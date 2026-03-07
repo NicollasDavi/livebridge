@@ -1,0 +1,11 @@
+# Stream output (segmentos HLS)
+server/stream/*
+!server/stream/.gitkeep
+
+# Docker
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

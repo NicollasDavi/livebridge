@@ -1,0 +1,31 @@
+# LiveBridge - MediaMTX config otimizado para menor latência
+
+logLevel: warn
+
+# Desabilitar protocolos não usados (economiza recursos)
+rtsp: false
+srt: false
+
+# RTMP - OBS publica aqui
+rtmp: true
+rtmpAddress: :1935
+
+# HLS Low-Latency (fallback - pausa/voltar)
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: ['*']
+hlsVariant: lowLatency
+hlsAlwaysRemux: true
+hlsSegmentCount: 5
+hlsSegmentDuration: 1s
+hlsPartDuration: 150ms
+hlsSegmentMaxSize: 50M
+
+# WebRTC - < 1 segundo de latência
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcSTUNGatherTimeout: 3s
+webrtcHandshakeTimeout: 5s
+webrtcTrackGatherTimeout: 2s

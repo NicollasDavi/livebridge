@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveBridge — Player ao vivo</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0d0d0f;
+            --surface: #16161a;
+            --accent: #00d4aa;
+            --accent-dim: rgba(0, 212, 170, 0.3);
+            --text: #e4e4e7;
+            --text-muted: #71717a;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        }
+        .container { width: 100%; max-width: 900px; }
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .player-wrap {
+            background: var(--surface);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .video-container { position: relative; aspect-ratio: 16/9; background: #000; }
+        video { width: 100%; height: 100%; display: block; }
+        .controls {
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+        }
+        .btn {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .btn-play { background: var(--accent); color: var(--bg); }
+        .btn-play:hover { background: #00e6b8; }
+        .btn-live {
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        .btn-live:hover { background: rgba(0, 212, 170, 0.2); }
+        .btn-live::before { content: "● "; color: #ef4444; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 50% { opacity: 0.5; } }
+        .btn-webrtc { background: #3b82f6; color: #fff; }
+        .btn-webrtc:hover { background: #2563eb; }
+        .seek-wrap { flex: 1; min-width: 120px; display: flex; align-items: center; gap: 0.5rem; }
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: var(--bg);
+            border-radius: 3px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+        }
+        .time { font-size: 0.8rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; min-width: 4rem; }
+        .status { font-size: 0.75rem; color: var(--text-muted); padding: 0.25rem 0.5rem; background: var(--bg); border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+        .status.live { color: var(--accent); }
+        .form-wrap {
+            margin-top: 1.5rem;
+            padding: 1.25rem;
+            background: var(--surface);
+            border-radius: 12px;
+        }
+        .form-wrap label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }
+        .form-wrap input {
+            width: 100%;
+            padding: 0.6rem 1rem;
+            background: var(--bg);
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+        }
+        .form-wrap input:focus { outline: none; border-color: var(--accent); }
+        .form-wrap .btns { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .form-wrap .btn { margin-top: 0; }
+        .form-wrap .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
+        .error { color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LiveBridge</h1>
+        <div class="player-wrap hidden" id="playerWrap">
+            <div class="video-container">
+                <video id="video" playsinline controls></video>
+            </div>
+            <div class="controls" id="hlsControls">
+                <button class="btn btn-play" id="btnPlay">▶ Pausar</button>
+                <button class="btn btn-live" id="btnLive">Ir ao vivo</button>
+                <div class="seek-wrap">
+                    <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+                    <span class="time" id="time">--:-- / ao vivo</span>
+                </div>
+                <span class="status" id="status">Carregando...</span>
+            </div>
+        </div>
+        <div class="form-wrap" id="formWrap">
+            <label for="streamName">Nome do stream</label>
+            <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
+            <div class="btns">
+                <button class="btn btn-webrtc" id="btnWebRTC">Assistir ao vivo (&lt;1s)</button>
+                <button class="btn btn-play" id="btnHLS">Assistir com pausa/voltar</button>
+            </div>
+            <p class="hint">WebRTC: latência mínima, sempre ao vivo. HLS: pode pausar e voltar ~30s.</p>
+            <div class="error hidden" id="error"></div>
+        </div>
+    </div>
+    <script>
+        const video = document.getElementById('video');
+        const btnPlay = document.getElementById('btnPlay');
+        const btnLive = document.getElementById('btnLive');
+        const seek = document.getElementById('seek');
+        const timeEl = document.getElementById('time');
+        const statusEl = document.getElementById('status');
+        const hlsControls = document.getElementById('hlsControls');
+        const formWrap = document.getElementById('formWrap');
+        const streamNameInput = document.getElementById('streamName');
+        const btnWebRTC = document.getElementById('btnWebRTC');
+        const btnHLS = document.getElementById('btnHLS');
+        const errorEl = document.getElementById('error');
+
+        const host = window.location.hostname;
+        let hls = null;
+
+        function getWebRTCUrl(name) {
+            return 'http://' + host + ':8889/live/' + encodeURIComponent(name);
+        }
+        function getHLSUrl(name) {
+            return 'http://' + host + ':8888/live/' + encodeURIComponent(name) + '/index.m3u8';
+        }
+
+        function showError(msg) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
+        function hideError() { errorEl.classList.add('hidden'); }
+
+        btnWebRTC.addEventListener('click', () => {
+            const name = streamNameInput.value.trim();
+            if (!name) { showError('Digite o nome do stream.'); return; }
+            hideError();
+            window.location.href = getWebRTCUrl(name);
+        });
+
+        btnHLS.addEventListener('click', () => {
+            const name = streamNameInput.value.trim();
+            if (!name) { showError('Digite o nome do stream.'); return; }
+            hideError();
+            initHLSPlayer(name);
+        });
+
+        streamNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') btnHLS.click();
+        });
+
+        function updateTime() {
+            if (!video.seekable.length) { timeEl.textContent = '--:-- / ao vivo'; return; }
+            const end = video.seekable.end(video.seekable.length - 1);
+            const curr = video.currentTime;
+            const lag = end - curr;
+            timeEl.textContent = lag < 2 ? 'ao vivo' : formatTime(curr) + ' / ao vivo (−' + Math.round(lag) + 's)';
+        }
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return m + ':' + (sec < 10 ? '0' : '') + sec;
+        }
+        function goToLive() {
+            if (!video.seekable.length) return;
+            video.currentTime = video.seekable.end(video.seekable.length - 1);
+            updateTime();
+        }
+        function updateSeekBar() {
+            if (!video.seekable.length) return;
+            const end = video.seekable.end(video.seekable.length - 1);
+            const start = video.seekable.start(0);
+            const range = end - start;
+            if (range <= 0) return;
+            seek.value = ((video.currentTime - start) / range) * 100;
+        }
+
+        function initHLSPlayer(streamName) {
+            const url = getHLSUrl(streamName);
+            statusEl.textContent = 'Conectando...';
+            statusEl.classList.remove('live');
+            hlsControls.classList.remove('hidden');
+
+            if (Hls.isSupported()) {
+                if (hls) { hls.destroy(); hls = null; }
+                hls = new Hls({
+                    liveSyncDurationCount: 1,
+                    liveMaxLatencyDurationCount: 2,
+                    liveDurationInfinity: true
+                });
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    statusEl.textContent = 'Stream pronto';
+                    statusEl.classList.add('live');
+                    video.play().catch(() => {});
+                });
+                hls.on(Hls.Events.ERROR, (e, d) => {
+                    if (d.fatal) {
+                        statusEl.textContent = 'Erro';
+                        showError(d.type === Hls.ErrorTypes.NETWORK_ERROR ? 'Stream não encontrado.' : 'Erro no stream.');
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = url;
+                video.addEventListener('loadedmetadata', () => { video.play().catch(() => {}); });
+            } else {
+                showError('Navegador não suporta HLS.');
+                return;
+            }
+
+            video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
+            video.onseeked = updateSeekBar;
+
+            document.getElementById('playerWrap').classList.remove('hidden');
+            formWrap.classList.add('hidden');
+        }
+
+        btnPlay.addEventListener('click', () => {
+            if (video.paused) { video.play(); btnPlay.textContent = '⏸ Pausar'; }
+            else { video.pause(); btnPlay.textContent = '▶ Reproduzir'; }
+        });
+        btnLive.addEventListener('click', goToLive);
+        seek.addEventListener('input', () => {
+            if (!video.seekable.length) return;
+            const end = video.seekable.end(video.seekable.length - 1);
+            const start = video.seekable.start(0);
+            video.currentTime = start + (parseFloat(seek.value) / 100) * (end - start);
+        });
+        video.addEventListener('play', () => { btnPlay.textContent = '⏸ Pausar'; });
+        video.addEventListener('pause', () => { btnPlay.textContent = '▶ Reproduzir'; });
+
+        const params = new URLSearchParams(window.location.search);
+        const streamParam = params.get('stream');
+        if (streamParam) {
+            streamNameInput.value = streamParam;
+            const mode = params.get('mode') || 'webrtc';
+            if (mode === 'hls') initHLSPlayer(streamParam);
+            else window.location.href = getWebRTCUrl(streamParam);
+        }
+    </script>
+</body>
+</html>
