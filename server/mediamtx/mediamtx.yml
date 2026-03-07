@@ -29,3 +29,7 @@ webrtcLocalUDPAddress: :8189
 webrtcSTUNGatherTimeout: 3s
 webrtcHandshakeTimeout: 5s
 webrtcTrackGatherTimeout: 2s
+
+# Permite qualquer path receber stream (RTMP rtmp://IP:1935/live/teste)
+pathDefaults:
+  source: publisher
