@@ -37,7 +37,7 @@ docker compose up -d
 | 8888        | TCP       | HLS           |
 | 8889        | TCP       | WebRTC sinal  |
 
-**Firewall:** libere **8189/UDP** para o WebRTC funcionar.
+**Firewall:** libere **8189/UDP** e **8189/TCP** para o WebRTC funcionar.
 
 ## Estrutura
 

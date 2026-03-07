@@ -3,12 +3,14 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: livebridge-mediamtx
     restart: unless-stopped
-    # Opcional: MTX_WEBRTCADDITIONALHOSTS=SEU_IP se WebRTC falhar atrás de NAT
+    environment:
+      - MTX_WEBRTCADDITIONALHOSTS=212.85.1.54
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
     ports:
       - "1935:1935"     # RTMP
-      - "8189:8189/udp" # WebRTC UDP (obrigatório)
+      - "8189:8189/udp" # WebRTC mídia UDP
+      - "8189:8189/tcp" # WebRTC fallback TCP (quando UDP bloqueado)
       - "8888:8888"     # HLS
       - "8889:8889"     # WebRTC HTTP
 
