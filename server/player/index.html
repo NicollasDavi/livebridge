@@ -184,7 +184,10 @@
         </div>
     </div>
     <script>
+        window.addEventListener('error', function(e) { console.error('[LiveBridge] Window error', e.message, e.filename, e.lineno, e); });
+        window.addEventListener('unhandledrejection', function(e) { console.error('[LiveBridge] Unhandled rejection', e.reason); });
         document.addEventListener('DOMContentLoaded', function() {
+        console.log('[LiveBridge] DOMContentLoaded');
         const video = document.getElementById('video');
         const btnPlay = document.getElementById('btnPlay');
         const btnLive = document.getElementById('btnLive');
@@ -209,6 +212,7 @@
 
         document.getElementById('btnHLS').addEventListener('click', () => {
             const name = streamNameInput.value.trim();
+            console.log('[LiveBridge] Clicou Assistir ao vivo', name);
             if (!name) { showError('Digite o nome do stream.'); return; }
             hideError();
             initHLSPlayer(name);
@@ -291,9 +295,11 @@
             list.innerHTML = '';
             empty.textContent = 'Carregando...';
             empty.classList.remove('hidden');
+            console.log('[LiveBridge] Carregando lista de gravações...');
             fetch('/api/recordings')
-                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(r => { console.log('[LiveBridge] /api/recordings status', r.status); return r.json().then(data => ({ ok: r.ok, data })); })
                 .then(({ ok, data: recordings }) => {
+                    console.log('[LiveBridge] Gravações recebidas', { ok, count: recordings?.length, recordings });
                     empty.classList.add('hidden');
                     if (!ok && recordings?.error) {
                         empty.textContent = recordings.error;
@@ -315,6 +321,7 @@
                         `;
                         el.querySelector('.btn').addEventListener('click', () => {
                             const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
+                            console.log('[LiveBridge] Clicou Assistir gravação', { path: rec.path, session: rec.session, url });
                             initHLSPlayer(streamLabel, url, true);
                         });
                         list.appendChild(el);
@@ -327,12 +334,15 @@
         }
 
         function initHLSPlayer(streamName, hlsUrl, isVod = false) {
+            console.log('[LiveBridge] initHLSPlayer', { streamName, hlsUrl, isVod });
             if (typeof Hls === 'undefined') {
+                console.error('[LiveBridge] Hls não definido');
                 showError('Erro ao carregar o player. Verifique se há bloqueador de anúncios ou firewall.');
                 return;
             }
             isVodMode = isVod;
             const url = hlsUrl || getHLSUrl(streamName);
+            console.log('[LiveBridge] URL:', url);
             statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
             hlsControls.classList.remove('hidden');
@@ -348,14 +358,22 @@
                     maxBufferLength: isVod ? 30 : 3,
                     maxMaxBufferLength: isVod ? 60 : 6
                 });
-                hls.loadSource(url);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    statusEl.textContent = isVod ? 'Gravação pronta' : 'Stream pronto';
-                    statusEl.classList.add('live');
-                    video.play().catch(() => {});
-                });
+                hls.on(Hls.Events.MANIFEST_LOADING, () => console.log('[LiveBridge] MANIFEST_LOADING'));
+                hls.on(Hls.Events.MANIFEST_LOADED, (e, d) => console.log('[LiveBridge] MANIFEST_LOADED', d));
+                hls.on(Hls.Events.LEVEL_LOADED, (e, d) => console.log('[LiveBridge] LEVEL_LOADED', d));
+                hls.on(Hls.Events.FRAG_LOADING, (e, d) => console.log('[LiveBridge] FRAG_LOADING', d.frag?.url));
+                hls.on(Hls.Events.FRAG_LOADED, (e, d) => console.log('[LiveBridge] FRAG_LOADED', d.frag?.sn));
+                hls.on(Hls.Events.FRAG_LOAD_ERROR, (e, d) => console.error('[LiveBridge] FRAG_LOAD_ERROR', d));
                 hls.on(Hls.Events.ERROR, (e, d) => {
+                    console.error('[LiveBridge] HLS ERROR', {
+                        fatal: d.fatal,
+                        type: d.type,
+                        details: d.details,
+                        reason: d.reason,
+                        url: d.url,
+                        response: d.response ? { code: d.response.code, url: d.response.url } : null,
+                        event: d
+                    });
                     if (d.fatal) {
                         statusEl.textContent = 'Erro';
                         let msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
@@ -363,6 +381,14 @@
                             : (d.details || 'Erro') + (d.reason ? ': ' + d.reason : '') + (d.response ? ' (HTTP ' + d.response.code + ')' : '');
                         showError(msg);
                     }
+                });
+                hls.loadSource(url);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    console.log('[LiveBridge] MANIFEST_PARSED - stream pronto');
+                    statusEl.textContent = isVod ? 'Gravação pronta' : 'Stream pronto';
+                    statusEl.classList.add('live');
+                    video.play().catch(e => console.error('[LiveBridge] video.play erro', e));
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
