@@ -153,8 +153,8 @@
                 <video id="video" playsinline controls></video>
             </div>
             <div class="controls" id="hlsControls">
-                <button class="btn btn-play" id="btnPlay">▶ Pausar</button>
-                <button class="btn btn-live" id="btnLive">Ir ao vivo</button>
+                <button type="button" class="btn btn-play" id="btnPlay">▶ Pausar</button>
+                <button type="button" class="btn btn-live" id="btnLive">Ir ao vivo</button>
                 <div class="seek-wrap">
                     <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
                     <span class="time" id="time">--:-- / ao vivo</span>
@@ -164,14 +164,14 @@
         </div>
         <div class="form-wrap" id="formWrap">
             <div class="tabs">
-                <button class="tab active" data-tab="live">Ao vivo</button>
-                <button class="tab" data-tab="recordings">Gravações</button>
+                <button type="button" class="tab active" data-tab="live">Ao vivo</button>
+                <button type="button" class="tab" data-tab="recordings">Gravações</button>
             </div>
             <div class="tab-content active" id="tabLive">
                 <label for="streamName">Nome do stream</label>
                 <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
                 <div class="btns">
-                    <button class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
+                    <button type="button" class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
                 </div>
                 <p class="hint">No OBS: intervalo de keyframe = 1 ou 2 segundos (Saída → Configuração do encoder)</p>
             </div>
@@ -184,6 +184,7 @@
         </div>
     </div>
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
         const video = document.getElementById('video');
         const btnPlay = document.getElementById('btnPlay');
         const btnLive = document.getElementById('btnLive');
@@ -196,11 +197,11 @@
         const btnHLS = document.getElementById('btnHLS');
         const errorEl = document.getElementById('error');
 
-        const host = window.location.hostname;
+        const baseUrl = window.location.origin; // mesma origem = sem CORS
         let hls = null;
 
         function getHLSUrl(name) {
-            return 'http://' + host + ':8888/live/' + encodeURIComponent(name) + '/index.m3u8';
+            return baseUrl + '/hls/live/' + encodeURIComponent(name) + '/index.m3u8';
         }
 
         function showError(msg) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
@@ -269,7 +270,7 @@
         const streamParam = params.get('stream');
         if (streamParam) {
             streamNameInput.value = streamParam;
-            initHLSPlayer(streamParam);
+            try { initHLSPlayer(streamParam); } catch (e) { console.error(e); showError('Erro: ' + e.message); }
         }
 
         // Tabs
@@ -310,7 +311,7 @@
                         el.className = 'rec-item';
                         el.innerHTML = `
                             <span class="info">${streamLabel} <small>${rec.date}</small></span>
-                            <button class="btn btn-play">Assistir</button>
+                            <button type="button" class="btn btn-play">Assistir</button>
                         `;
                         el.querySelector('.btn').addEventListener('click', () => {
                             const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
@@ -326,12 +327,17 @@
         }
 
         function initHLSPlayer(streamName, hlsUrl, isVod = false) {
+            if (typeof Hls === 'undefined') {
+                showError('Erro ao carregar o player. Verifique se há bloqueador de anúncios ou firewall.');
+                return;
+            }
             isVodMode = isVod;
             const url = hlsUrl || getHLSUrl(streamName);
             statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
             hlsControls.classList.remove('hidden');
-            document.querySelector('.btn-live')?.classList.toggle('hidden', isVod);
+            var btnLiveEl = document.querySelector('.btn-live');
+            if (btnLiveEl) btnLiveEl.classList.toggle('hidden', isVod);
 
             if (Hls.isSupported()) {
                 if (hls) { hls.destroy(); hls = null; }
@@ -372,5 +378,7 @@
             document.getElementById('playerWrap').classList.remove('hidden');
             formWrap.classList.add('hidden');
         }
+        }); // DOMContentLoaded
+    </script>
 </body>
 </html>

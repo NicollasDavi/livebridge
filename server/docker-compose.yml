@@ -49,6 +49,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+      - mediamtx
     volumes:
       - ./player:/usr/share/nginx/html:ro
       - ./player/nginx.conf:/etc/nginx/conf.d/default.conf:ro
