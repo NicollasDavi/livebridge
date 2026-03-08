@@ -10,7 +10,6 @@ server/recordings/*
 node_modules/
 
 # Docker
-
 .env.local
 
 # OS

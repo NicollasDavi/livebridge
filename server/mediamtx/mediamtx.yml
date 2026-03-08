@@ -29,4 +29,4 @@ paths:
     recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
     recordFormat: mpegts
     recordSegmentDuration: 60s
-    recordDeleteAfter: 0
+    recordDeleteAfter: 0s

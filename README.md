@@ -31,6 +31,19 @@ docker compose up -d
 | 8081   | Player web       |
 | 8888   | HLS              |
 
+## Firewall (Hostinger VPS)
+
+Se o OBS der **"conexão expirou"**, libere as portas no **hPanel → VPS → Firewall**:
+
+| Porta | Protocolo | Uso        |
+|-------|-----------|------------|
+| 1935  | TCP       | RTMP (OBS) |
+| 8081  | TCP       | Player     |
+| 8888  | TCP       | HLS        |
+| 3000  | TCP       | API        |
+
+Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
+
 ## OBS — configuração
 
 - **Encoder:** x264 ou NVENC (H.264)
