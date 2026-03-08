@@ -128,10 +128,14 @@ function scanRecordings() {
   };
   try {
     const pathBase = join(RECORDINGS_DIR, 'live');
-    if (!existsSync(pathBase)) {
+    result.pathExists = existsSync(pathBase);
+    result.underLive = existsSync(pathBase) ? readdirSync(pathBase, { withFileTypes: true }).map(e => ({ name: e.name, isDir: e.isDirectory() })) : [];
+    if (!result.pathExists) {
       result.error = `Pasta ${pathBase} não existe`;
+      result.underRecordings = existsSync(RECORDINGS_DIR) ? readdirSync(RECORDINGS_DIR) : [];
       return result;
     }
+    result.underRecordings = readdirSync(RECORDINGS_DIR);
     const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
     for (const s of streams) {
       const streamPath = join(pathBase, s.name);
@@ -161,22 +165,26 @@ app.get('/debug', (req, res) => res.json(scanRecordings()));
 const STALE_MS = 2 * 60 * 1000;
 const processedDirs = new Set();
 
+let lastLogTime = 0;
 function findStaleSessions() {
   try {
     const pathBase = join(RECORDINGS_DIR, 'live');
     if (!existsSync(pathBase)) return;
     const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
+    if (streams.length === 0) return;
+    let totalSessions = 0;
     for (const s of streams) {
       const streamPath = join(pathBase, s.name);
       const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
       for (const sess of sessions) {
         const sessionPath = join(streamPath, sess.name);
+        const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
+        if (tsFiles.length === 0) continue;
+        totalSessions++;
         const key = sessionPath;
         if (processedDirs.has(key)) continue;
         const stat = statSync(sessionPath);
         const age = Date.now() - stat.mtimeMs;
-        const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
-        if (tsFiles.length === 0) continue;
         if (age < STALE_MS) continue;
         const mtxPath = `live/${s.name}`;
         processedDirs.add(key);
@@ -194,6 +202,10 @@ function findStaleSessions() {
           console.error('[merge] Erro:', e.message);
         });
       }
+    }
+    if (totalSessions > 0 && Date.now() - lastLogTime > 60000) {
+      lastLogTime = Date.now();
+      console.log(`[merge] Scan: ${streams.length} stream(s), ${totalSessions} sessão(ões) com .ts`);
     }
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[merge] scan error', e.message);
