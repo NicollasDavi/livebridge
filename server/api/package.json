@@ -1,0 +1,11 @@
+{
+  "name": "livebridge-api",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/s3-request-presigner": "^3.600.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  }
+}

@@ -115,6 +115,34 @@
         .form-wrap .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
         .error { color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; }
         .hidden { display: none !important; }
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        .tab {
+            padding: 0.5rem 1rem;
+            border: none;
+            background: var(--bg);
+            color: var(--text-muted);
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: var(--text); }
+        .tab.active { background: var(--accent-dim); color: var(--accent); }
+        .tab-content { margin-top: 0.5rem; }
+        .recordings-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; max-height: 200px; overflow-y: auto; }
+        .rec-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 1rem;
+            background: var(--bg);
+            border-radius: 8px;
+            border: 1px solid #27272a;
+        }
+        .rec-item .info { font-size: 0.9rem; font-family: 'JetBrains Mono', monospace; }
+        .rec-item .info small { color: var(--text-muted); font-size: 0.75rem; }
+        .rec-item .btn { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -135,12 +163,23 @@
             </div>
         </div>
         <div class="form-wrap" id="formWrap">
-            <label for="streamName">Nome do stream</label>
-            <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
-            <div class="btns">
-                <button class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
+            <div class="tabs">
+                <button class="tab active" data-tab="live">Ao vivo</button>
+                <button class="tab" data-tab="recordings">Gravações</button>
             </div>
-            <p class="hint">LL-HLS — delay reduzido mesmo com keyframes longos no OBS</p>
+            <div class="tab-content active" id="tabLive">
+                <label for="streamName">Nome do stream</label>
+                <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
+                <div class="btns">
+                    <button class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
+                </div>
+                <p class="hint">No OBS: intervalo de keyframe = 1 ou 2 segundos (Saída → Configuração do encoder)</p>
+            </div>
+            <div class="tab-content hidden" id="tabRecordings">
+                <p class="hint">Transmissões gravadas no R2</p>
+                <div id="recordingsList" class="recordings-list"></div>
+                <p class="hint" id="recordingsEmpty">Carregando...</p>
+            </div>
             <div class="error hidden" id="error"></div>
         </div>
     </div>
@@ -179,11 +218,15 @@
         });
 
         function updateTime() {
-            if (!video.seekable.length) { timeEl.textContent = '--:-- / ao vivo'; return; }
+            if (!video.seekable.length) { timeEl.textContent = isVodMode ? '--:-- / --:--' : '--:-- / ao vivo'; return; }
             const end = video.seekable.end(video.seekable.length - 1);
             const curr = video.currentTime;
-            const lag = end - curr;
-            timeEl.textContent = lag < 2 ? 'ao vivo' : formatTime(curr) + ' / ao vivo (−' + Math.round(lag) + 's)';
+            if (isVodMode) {
+                timeEl.textContent = formatTime(curr) + ' / ' + formatTime(end);
+            } else {
+                const lag = end - curr;
+                timeEl.textContent = lag < 2 ? 'ao vivo' : formatTime(curr) + ' / ao vivo (−' + Math.round(lag) + 's)';
+            }
         }
         function formatTime(s) {
             const m = Math.floor(s / 60);
@@ -204,26 +247,100 @@
             seek.value = ((video.currentTime - start) / range) * 100;
         }
 
-        function initHLSPlayer(streamName) {
-            const url = getHLSUrl(streamName);
+        let isVodMode = false;
+
+        btnPlay.addEventListener('click', () => {
+            if (video.paused) { video.play(); btnPlay.textContent = '⏸ Pausar'; }
+            else { video.pause(); btnPlay.textContent = '▶ Reproduzir'; }
+        });
+        btnLive.addEventListener('click', goToLive);
+        seek.addEventListener('input', () => {
+            if (!video.seekable.length) return;
+            const start = video.seekable.start(0);
+            const end = video.seekable.end(video.seekable.length - 1);
+            const range = end - start;
+            if (range <= 0) return;
+            video.currentTime = start + (parseFloat(seek.value) / 100) * range;
+        });
+        video.addEventListener('play', () => { btnPlay.textContent = '⏸ Pausar'; });
+        video.addEventListener('pause', () => { btnPlay.textContent = '▶ Reproduzir'; });
+
+        const params = new URLSearchParams(window.location.search);
+        const streamParam = params.get('stream');
+        if (streamParam) {
+            streamNameInput.value = streamParam;
+            initHLSPlayer(streamParam);
+        }
+
+        // Tabs
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(x => x.classList.add('hidden'));
+                t.classList.add('active');
+                const id = t.dataset.tab === 'live' ? 'tabLive' : 'tabRecordings';
+                document.getElementById(id).classList.remove('hidden');
+                if (t.dataset.tab === 'recordings') loadRecordings();
+            });
+        });
+
+        function loadRecordings() {
+            const list = document.getElementById('recordingsList');
+            const empty = document.getElementById('recordingsEmpty');
+            list.innerHTML = '';
+            empty.textContent = 'Carregando...';
+            empty.classList.remove('hidden');
+            fetch('/api/recordings')
+                .then(r => r.json())
+                .then(recordings => {
+                    empty.classList.add('hidden');
+                    if (!recordings.length) {
+                        empty.textContent = 'Nenhuma gravação encontrada.';
+                        empty.classList.remove('hidden');
+                        return;
+                    }
+                    recordings.forEach(rec => {
+                        const streamLabel = rec.path.split('/').pop() || rec.path;
+                        const el = document.createElement('div');
+                        el.className = 'rec-item';
+                        el.innerHTML = `
+                            <span class="info">${streamLabel} <small>${rec.date}</small></span>
+                            <button class="btn btn-play">Assistir</button>
+                        `;
+                        el.querySelector('.btn').addEventListener('click', () => {
+                            const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
+                            initHLSPlayer(streamLabel, url, true);
+                        });
+                        list.appendChild(el);
+                    });
+                })
+                .catch(err => {
+                    empty.textContent = 'Erro ao carregar gravações: ' + err.message;
+                    empty.classList.remove('hidden');
+                });
+        }
+
+        function initHLSPlayer(streamName, hlsUrl, isVod = false) {
+            isVodMode = isVod;
+            const url = hlsUrl || getHLSUrl(streamName);
             statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
             hlsControls.classList.remove('hidden');
+            document.querySelector('.btn-live')?.classList.toggle('hidden', isVod);
 
             if (Hls.isSupported()) {
                 if (hls) { hls.destroy(); hls = null; }
                 hls = new Hls({
-                    lowLatencyMode: true,
                     liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 2,
-                    liveDurationInfinity: true,
-                    maxBufferLength: 5,
-                    maxMaxBufferLength: 10
+                    liveMaxLatencyDurationCount: 1,
+                    liveDurationInfinity: !isVod,
+                    maxBufferLength: isVod ? 30 : 3,
+                    maxMaxBufferLength: isVod ? 60 : 6
                 });
                 hls.loadSource(url);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    statusEl.textContent = 'Stream pronto';
+                    statusEl.textContent = isVod ? 'Gravação pronta' : 'Stream pronto';
                     statusEl.classList.add('live');
                     video.play().catch(() => {});
                 });
@@ -231,7 +348,7 @@
                     if (d.fatal) {
                         statusEl.textContent = 'Erro';
                         const msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
-                            ? 'Stream não encontrado. Inicie a transmissão no OBS primeiro.'
+                            ? (isVod ? 'Gravação não encontrada.' : 'Stream não encontrado. Inicie a transmissão no OBS primeiro.')
                             : (d.details || 'Erro no stream.') + (d.reason ? ' ' + d.reason : '');
                         showError(msg);
                     }
@@ -250,27 +367,5 @@
             document.getElementById('playerWrap').classList.remove('hidden');
             formWrap.classList.add('hidden');
         }
-
-        btnPlay.addEventListener('click', () => {
-            if (video.paused) { video.play(); btnPlay.textContent = '⏸ Pausar'; }
-            else { video.pause(); btnPlay.textContent = '▶ Reproduzir'; }
-        });
-        btnLive.addEventListener('click', goToLive);
-        seek.addEventListener('input', () => {
-            if (!video.seekable.length) return;
-            const end = video.seekable.end(video.seekable.length - 1);
-            const start = video.seekable.start(0);
-            video.currentTime = start + (parseFloat(seek.value) / 100) * (end - start);
-        });
-        video.addEventListener('play', () => { btnPlay.textContent = '⏸ Pausar'; });
-        video.addEventListener('pause', () => { btnPlay.textContent = '▶ Reproduzir'; });
-
-        const params = new URLSearchParams(window.location.search);
-        const streamParam = params.get('stream');
-        if (streamParam) {
-            streamNameInput.value = streamParam;
-            initHLSPlayer(streamParam);
-        }
-    </script>
 </body>
 </html>

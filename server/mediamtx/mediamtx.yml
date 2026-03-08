@@ -11,18 +11,22 @@ webrtc: false
 rtmp: true
 rtmpAddress: :1935
 
-# HLS Low-Latency — usa parts (~250ms) mesmo com keyframes longos do OBS
+# HLS (com áudio)
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ['*']
-hlsVariant: lowLatency
+hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 4
+hlsSegmentCount: 2
 hlsSegmentDuration: 1s
-hlsPartDuration: 250ms
 hlsSegmentMaxSize: 50M
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
 paths:
   "~^live/.+":
     source: publisher
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+    recordFormat: mpegts
+    recordSegmentDuration: 60s
+    recordDeleteAfter: 0

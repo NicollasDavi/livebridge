@@ -5,14 +5,50 @@ services:
     restart: unless-stopped
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - ./recordings:/recordings
     ports:
       - "1935:1935"   # RTMP (OBS)
       - "8888:8888"   # HLS
+
+  sync-r2:
+    image: rclone/rclone:latest
+    container_name: livebridge-sync-r2
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    volumes:
+      - ./recordings:/recordings
+      - ./rclone/rclone.conf:/config/rclone/rclone.conf:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          rclone move /recordings r2:livebridge/recordings/ \
+            --config /config/rclone/rclone.conf \
+            --delete-empty-src-dirs \
+            --min-age 30s \
+            -v
+          sleep 60
+        done
+
+  api:
+    build: ./api
+    container_name: livebridge-api
+    restart: unless-stopped
+    environment:
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY}
+      R2_SECRET_KEY: ${R2_SECRET_KEY}
+      R2_BUCKET: ${R2_BUCKET:-livebridge}
+    ports:
+      - "3000:3000"
 
   nginx:
     image: nginx:alpine
     container_name: livebridge-player
     restart: unless-stopped
+    depends_on:
+      - api
     volumes:
       - ./player:/usr/share/nginx/html:ro
       - ./player/nginx.conf:/etc/nginx/conf.d/default.conf:ro

@@ -2,6 +2,13 @@
 server/stream/*
 !server/stream/.gitkeep
 
+# Gravações (upload para R2)
+server/recordings/*
+!server/recordings/.gitkeep
+
+# Node
+node_modules/
+
 # Docker
 .env
 .env.local

@@ -1,0 +1,6 @@
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = SEU_ACCESS_KEY_ID
+secret_access_key = SEU_SECRET_ACCESS_KEY
+endpoint = https://SEU_ACCOUNT_ID.r2.cloudflarestorage.com
