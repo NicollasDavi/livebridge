@@ -138,10 +138,9 @@
             <label for="streamName">Nome do stream</label>
             <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
             <div class="btns">
-                <button class="btn btn-play" id="btnHLS">Assistir (HLS)</button>
-                <button class="btn btn-webrtc" id="btnWebRTC">Assistir ao vivo (&lt;1s)</button>
+                <button class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
             </div>
-            <p class="hint">WebRTC: latência mínima, sempre ao vivo. HLS: pode pausar e voltar ~30s.</p>
+            <p class="hint">Delay ~5-10s. Vídeo e áudio.</p>
             <div class="error hidden" id="error"></div>
         </div>
     </div>
@@ -155,16 +154,12 @@
         const hlsControls = document.getElementById('hlsControls');
         const formWrap = document.getElementById('formWrap');
         const streamNameInput = document.getElementById('streamName');
-        const btnWebRTC = document.getElementById('btnWebRTC');
         const btnHLS = document.getElementById('btnHLS');
         const errorEl = document.getElementById('error');
 
         const host = window.location.hostname;
         let hls = null;
 
-        function getWebRTCUrl(name) {
-            return 'http://' + host + ':8889/live_w/' + encodeURIComponent(name);
-        }
         function getHLSUrl(name) {
             return 'http://' + host + ':8888/live/' + encodeURIComponent(name) + '/index.m3u8';
         }
@@ -172,14 +167,7 @@
         function showError(msg) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
         function hideError() { errorEl.classList.add('hidden'); }
 
-        btnWebRTC.addEventListener('click', () => {
-            const name = streamNameInput.value.trim();
-            if (!name) { showError('Digite o nome do stream.'); return; }
-            hideError();
-            window.location.href = getWebRTCUrl(name);
-        });
-
-        btnHLS.addEventListener('click', () => {
+        document.getElementById('btnHLS').addEventListener('click', () => {
             const name = streamNameInput.value.trim();
             if (!name) { showError('Digite o nome do stream.'); return; }
             hideError();
@@ -280,9 +268,7 @@
         const streamParam = params.get('stream');
         if (streamParam) {
             streamNameInput.value = streamParam;
-            const mode = params.get('mode') || 'webrtc';
-            if (mode === 'hls') initHLSPlayer(streamParam);
-            else window.location.href = getWebRTCUrl(streamParam);
+            initHLSPlayer(streamParam);
         }
     </script>
 </body>

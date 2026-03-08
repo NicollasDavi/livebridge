@@ -2,15 +2,16 @@
 
 logLevel: warn
 
-# Desabilitar protocolos não usados (economiza recursos)
+# Desabilitar protocolos não usados
 rtsp: false
 srt: false
+webrtc: false
 
 # RTMP - OBS publica aqui
 rtmp: true
 rtmpAddress: :1935
 
-# HLS Low-Latency (~5-10s de delay)
+# HLS Low-Latency (~5-10s, com áudio)
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ['*']
@@ -18,27 +19,10 @@ hlsVariant: lowLatency
 hlsAlwaysRemux: true
 hlsSegmentCount: 4
 hlsSegmentDuration: 1s
-hlsPartDuration: 200ms
+hlsPartDuration: 250ms
 hlsSegmentMaxSize: 50M
 
-# WebRTC - < 1 segundo de latência
-webrtc: true
-webrtcAddress: :8889
-webrtcAllowOrigins: ['*']
-webrtcLocalUDPAddress: :8189
-webrtcLocalTCPAddress: :8189
-webrtcAdditionalHosts: []
-webrtcICEServers2:
-  - url: stun:stun.l.google.com:19302
-webrtcSTUNGatherTimeout: 5s
-webrtcHandshakeTimeout: 10s
-webrtcTrackGatherTimeout: 2s
-
-# Paths: live/xxx = OBS publica | live_w/xxx = transcodificado para WebRTC (com áudio)
+# Path para rtmp://IP:1935/live/QUALQUERNOME
 paths:
-  "~^live/(.+)$":
-    source: publisher
-    runOnReady: ffmpeg -i rtmp://localhost:1935/live/$G1 -c:v copy -c:a libopus -b:a 128k -f flv rtmp://localhost:1935/live_w/$G1
-    runOnReadyRestart: yes
-  "~^live_w/(.+)$":
+  "~^live/.+":
     source: publisher
