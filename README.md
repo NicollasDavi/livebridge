@@ -50,9 +50,17 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 - **Intervalo de keyframe:** 1–2 segundos
 - **Bitrate:** 2500–6000 kbps
 
-## Gravação no R2 (Cloudflare)
+## Gravação (estilo YouTube)
 
-As transmissões são gravadas automaticamente e enviadas para Cloudflare R2.
+Ao terminar a live, os segmentos são unidos em um único `.mp4` e enviados ao R2.
+
+- **Durante:** MediaMTX grava segmentos `.ts`
+- **Ao parar:** Hook `runOnNotReady` chama o serviço de merge
+- **Merge:** ffmpeg concatena, gera UUID, envia ao R2 como `recordings/videos/{uuid}.mp4`
+
+## R2 (Cloudflare)
+
+As gravações (`.mp4`) são enviadas automaticamente para Cloudflare R2.
 
 1. Crie um bucket "livebridge" no R2
 2. **Rclone** — credenciais em `server/rclone/rclone.conf` (copie de `rclone.conf.example`)

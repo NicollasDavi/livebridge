@@ -12,6 +12,7 @@ const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY;
 const R2_SECRET_KEY = process.env.R2_SECRET_KEY;
 const R2_BUCKET = process.env.R2_BUCKET || 'livebridge';
 const R2_PREFIX = 'recordings/';
+const R2_VIDEOS_PREFIX = 'recordings/videos/';
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({
@@ -37,9 +38,35 @@ function parseKey(key) {
   return { path, session, filename, key };
 }
 
-/** Lista gravações agrupadas por sessão */
+/** Lista gravações: prioriza .mp4 (merge) e fallback para segmentos HLS */
 app.get('/api/recordings', requireR2, async (req, res) => {
   try {
+    const videos = [];
+    let continuationToken;
+    do {
+      const result = await s3.send(new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: R2_VIDEOS_PREFIX,
+        ContinuationToken: continuationToken
+      }));
+      for (const obj of result.Contents || []) {
+        if (!obj.Key || !obj.Key.endsWith('.mp4')) continue;
+        const id = obj.Key.replace(R2_VIDEOS_PREFIX, '').replace('.mp4', '');
+        videos.push({
+          id,
+          key: obj.Key,
+          type: 'mp4',
+          date: obj.LastModified ? obj.LastModified.toISOString().slice(0, 19).replace('T', ' ') : id
+        });
+      }
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    if (videos.length > 0) {
+      videos.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      return res.json(videos);
+    }
+
     const { Contents = [] } = await s3.send(new ListObjectsV2Command({
       Bucket: R2_BUCKET,
       Prefix: R2_PREFIX
@@ -51,20 +78,42 @@ app.get('/api/recordings', requireR2, async (req, res) => {
       if (!parsed || !parsed.filename || parsed.filename.endsWith('.m3u8')) continue;
       const id = `${parsed.path}|${parsed.session}`;
       if (!sessions[id]) {
-        sessions[id] = { path: parsed.path, session: parsed.session, files: [] };
+        sessions[id] = { path: parsed.path, session: parsed.session, files: [], type: 'hls' };
       }
       sessions[id].files.push({ key: obj.Key, name: parsed.filename });
     }
     const list = Object.values(sessions).map(s => ({
       ...s,
-      files: s.files.sort((a, b) => a.name.localeCompare(b.name)),
-      date: s.session.replace(/_/g, ' '),
-      id: `${s.path}|${s.session}`
+      id: `${s.path}|${s.session}`,
+      date: s.session.replace(/_/g, ' ')
     })).sort((a, b) => b.session.localeCompare(a.session));
     res.json(list);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+/** Retorna URL para reproduzir vídeo .mp4 (id = uuid) */
+app.get('/api/recordings/video/:id', requireR2, async (req, res) => {
+  try {
+    const key = R2_VIDEOS_PREFIX + req.params.id + '.mp4';
+    if (USE_PRESIGNED) {
+      const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+      return res.redirect(url);
+    }
+    const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    res.set('Content-Type', 'video/mp4');
+    if (obj.ContentLength) res.set('Content-Length', String(obj.ContentLength));
+    const body = obj.Body;
+    if (body && typeof body.pipe === 'function') {
+      body.pipe(res);
+    } else {
+      res.send(Buffer.from(await body.transformToByteArray()));
+    }
+  } catch (e) {
+    console.error(e);
+    res.status(500).send(e.message);
   }
 });
 

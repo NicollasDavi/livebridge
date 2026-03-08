@@ -21,12 +21,15 @@ hlsSegmentCount: 3
 hlsSegmentDuration: 1s
 hlsSegmentMaxSize: 50M
 
+pathDefaults:
+  runOnNotReady: "curl -s -X POST 'http://merge:3001/webhook/stream-ended?path='$MTX_PATH"
+
 # Path para rtmp://IP:1935/live/QUALQUERNOME
 paths:
   "~^live/.+":
     source: publisher
     record: yes
-    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
     recordFormat: mpegts
     recordSegmentDuration: 60s
     recordDeleteAfter: 0s

@@ -313,23 +313,28 @@
                         return;
                     }
                     recordings.forEach(rec => {
-                        const streamLabel = rec.path.split('/').pop() || rec.path;
                         const el = document.createElement('div');
                         el.className = 'rec-item';
-                                                const isTimestamp = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session);
+                        const label = rec.type === 'mp4' ? (rec.date || rec.id) : (rec.path?.split('/').pop() || rec.path);
+                        const dbRef = rec.type === 'mp4' ? `id: ${rec.id}` : (
+                            /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session)
+                                ? `path: ${rec.path} | session: ${rec.session}`
+                                : `path: ${rec.path}/${rec.session} (sem pasta de data)`
+                        );
                         el.innerHTML = `
                             <span class="info">
-                                ${streamLabel} <small>${rec.date}</small>
-                                <br><small class="session-id">path: ${rec.path}</small>
-                                <br><small class="session-id">session: ${rec.session}</small>
-                                ${!isTimestamp ? '<br><small class="session-id" style="opacity:0.7">(session = stream — gravação sem pasta de data)</small>' : ''}
+                                ${label} <small>${rec.date}</small>
+                                <br><small class="session-id">${dbRef}</small>
                             </span>
                             <button type="button" class="btn btn-play">Assistir</button>
                         `;
                         el.querySelector('.btn').addEventListener('click', () => {
-                            const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
-                            console.log('[LiveBridge] Clicou Assistir gravação', { path: rec.path, session: rec.session, url });
-                            initHLSPlayer(streamLabel, url, true);
+                            if (rec.type === 'mp4') {
+                                initMP4Player(label, `/api/recordings/video/${rec.id}`);
+                            } else {
+                                const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
+                                initHLSPlayer(label, url, true);
+                            }
                         });
                         list.appendChild(el);
                     });
@@ -338,6 +343,23 @@
                     empty.textContent = 'Erro ao carregar gravações: ' + err.message;
                     empty.classList.remove('hidden');
                 });
+        }
+
+        function initMP4Player(label, url) {
+            if (hls) { hls.destroy(); hls = null; }
+            isVodMode = true;
+            video.src = url;
+            video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
+            video.onseeked = updateSeekBar;
+            statusEl.textContent = 'Carregando...';
+            statusEl.classList.remove('live');
+            hlsControls.classList.remove('hidden');
+            var btnLive = document.querySelector('.btn-live');
+            if (btnLive) btnLive.classList.add('hidden');
+            document.getElementById('playerWrap').classList.remove('hidden');
+            formWrap.classList.add('hidden');
+            video.play().catch(() => {});
+            video.onloadedmetadata = () => { statusEl.textContent = 'Gravação pronta'; };
         }
 
         function initHLSPlayer(streamName, hlsUrl, isVod = false) {
