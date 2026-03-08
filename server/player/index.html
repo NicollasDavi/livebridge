@@ -316,10 +316,13 @@
                         const streamLabel = rec.path.split('/').pop() || rec.path;
                         const el = document.createElement('div');
                         el.className = 'rec-item';
+                                                const isTimestamp = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session);
                         el.innerHTML = `
                             <span class="info">
                                 ${streamLabel} <small>${rec.date}</small>
+                                <br><small class="session-id">path: ${rec.path}</small>
                                 <br><small class="session-id">session: ${rec.session}</small>
+                                ${!isTimestamp ? '<br><small class="session-id" style="opacity:0.7">(session = stream — gravação sem pasta de data)</small>' : ''}
                             </span>
                             <button type="button" class="btn btn-play">Assistir</button>
                         `;

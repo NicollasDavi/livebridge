@@ -84,7 +84,11 @@ app.get('/api/recordings/playlist', requireR2, async (req, res) => {
         Prefix: prefix,
         ContinuationToken: continuationToken
       }));
-      const page = (result.Contents || []).filter(o => o.Key && o.Key.endsWith('.ts'));
+      const page = (result.Contents || []).filter(o => {
+        if (!o.Key || !o.Key.endsWith('.ts')) return false;
+        const afterPrefix = o.Key.slice(prefix.length);
+        return !afterPrefix.includes('/');
+      });
       tsFiles.push(...page);
       continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
     } while (continuationToken);
