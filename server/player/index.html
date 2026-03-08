@@ -140,7 +140,7 @@
             <div class="btns">
                 <button class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
             </div>
-            <p class="hint">Delay ~5-10s. Vídeo e áudio.</p>
+            <p class="hint">LL-HLS — delay reduzido mesmo com keyframes longos no OBS</p>
             <div class="error hidden" id="error"></div>
         </div>
     </div>
@@ -213,6 +213,7 @@
             if (Hls.isSupported()) {
                 if (hls) { hls.destroy(); hls = null; }
                 hls = new Hls({
+                    lowLatencyMode: true,
                     liveSyncDurationCount: 1,
                     liveMaxLatencyDurationCount: 2,
                     liveDurationInfinity: true,
