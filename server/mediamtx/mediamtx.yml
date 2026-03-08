@@ -17,7 +17,7 @@ hlsAddress: :8888
 hlsAllowOrigins: ['*']
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 2
+hlsSegmentCount: 3
 hlsSegmentDuration: 1s
 hlsSegmentMaxSize: 50M
 
