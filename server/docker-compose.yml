@@ -16,6 +16,8 @@ services:
     restart: unless-stopped
     depends_on:
       - mediamtx
+    environment:
+      R2_BUCKET: ${R2_BUCKET:-livebridge}
     volumes:
       - ./recordings:/recordings
       - ./rclone/rclone.conf:/config/rclone/rclone.conf:ro
@@ -23,7 +25,7 @@ services:
     command:
       - |
         while true; do
-          rclone move /recordings r2:livebridge/recordings/ \
+          rclone move /recordings "r2:$${R2_BUCKET:-livebridge}/recordings/" \
             --config /config/rclone/rclone.conf \
             --delete-empty-src-dirs \
             --min-age 30s \
