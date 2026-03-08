@@ -343,7 +343,7 @@
                 if (hls) { hls.destroy(); hls = null; }
                 hls = new Hls({
                     liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 1,
+                    liveMaxLatencyDurationCount: 2,
                     liveDurationInfinity: !isVod,
                     maxBufferLength: isVod ? 30 : 3,
                     maxMaxBufferLength: isVod ? 60 : 6
