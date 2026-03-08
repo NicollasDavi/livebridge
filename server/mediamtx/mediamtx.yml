@@ -11,15 +11,14 @@ webrtc: false
 rtmp: true
 rtmpAddress: :1935
 
-# HLS Low-Latency (~5-10s, com áudio)
+# HLS (com áudio)
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ['*']
-hlsVariant: lowLatency
+hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 4
-hlsSegmentDuration: 1s
-hlsPartDuration: 250ms
+hlsSegmentCount: 5
+hlsSegmentDuration: 2s
 hlsSegmentMaxSize: 50M
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
