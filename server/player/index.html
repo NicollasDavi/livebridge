@@ -142,6 +142,7 @@
         }
         .rec-item .info { font-size: 0.9rem; font-family: 'JetBrains Mono', monospace; }
         .rec-item .info small { color: var(--text-muted); font-size: 0.75rem; }
+        .rec-item .session-id { font-family: 'JetBrains Mono', monospace; opacity: 0.8; }
         .rec-item .btn { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
     </style>
 </head>
@@ -316,7 +317,10 @@
                         const el = document.createElement('div');
                         el.className = 'rec-item';
                         el.innerHTML = `
-                            <span class="info">${streamLabel} <small>${rec.date}</small></span>
+                            <span class="info">
+                                ${streamLabel} <small>${rec.date}</small>
+                                <br><small class="session-id">session: ${rec.session}</small>
+                            </span>
                             <button type="button" class="btn btn-play">Assistir</button>
                         `;
                         el.querySelector('.btn').addEventListener('click', () => {

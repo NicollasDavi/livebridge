@@ -1,5 +1,6 @@
 import express from 'express';
 import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Client } from '@aws-sdk/client-s3';
 import cors from 'cors';
 
@@ -67,29 +68,49 @@ app.get('/api/recordings', requireR2, async (req, res) => {
   }
 });
 
-/** Retorna playlist HLS (segmentos via proxy para evitar CORS no R2) */
+/** Retorna playlist HLS - usa proxy OU URLs presignadas (env USE_PRESIGNED=1 + CORS no R2) */
+const USE_PRESIGNED = process.env.USE_PRESIGNED === '1';
+
 app.get('/api/recordings/playlist', requireR2, async (req, res) => {
   try {
     const { path, session } = req.query;
     if (!path || !session) return res.status(400).send('path e session obrigatórios');
     const prefix = `${R2_PREFIX}${path}/${session}/`;
-    const { Contents = [] } = await s3.send(new ListObjectsV2Command({
-      Bucket: R2_BUCKET,
-      Prefix: prefix
-    }));
-    const tsFiles = Contents.filter(o => o.Key && o.Key.endsWith('.ts'))
-      .sort((a, b) => {
-        const ka = (a.Key || '').split('/').pop() || '';
-        const kb = (b.Key || '').split('/').pop() || '';
-        const na = parseInt(ka, 10);
-        const nb = parseInt(kb, 10);
-        if (!isNaN(na) && !isNaN(nb)) return na - nb;
-        return ka.localeCompare(kb);
-      });
+    const tsFiles = [];
+    let continuationToken;
+    do {
+      const result = await s3.send(new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken
+      }));
+      const page = (result.Contents || []).filter(o => o.Key && o.Key.endsWith('.ts'));
+      tsFiles.push(...page);
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    tsFiles.sort((a, b) => {
+      const ka = (a.Key || '').split('/').pop() || '';
+      const kb = (b.Key || '').split('/').pop() || '';
+      const na = parseInt(ka, 10);
+      const nb = parseInt(kb, 10);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return ka.localeCompare(kb, undefined, { numeric: true });
+    });
     if (tsFiles.length === 0) return res.status(404).send('Nenhum segmento encontrado');
+
     let m3u8 = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:60\n#EXT-X-MEDIA-SEQUENCE:0\n';
-    for (const f of tsFiles) {
-      m3u8 += `#EXTINF:60.0,\n/api/recordings/segment?key=${encodeURIComponent(f.Key)}\n`;
+
+    if (USE_PRESIGNED) {
+      const urls = await Promise.all(tsFiles.map(f =>
+        getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: f.Key }), { expiresIn: 3600 })
+      ));
+      for (const url of urls) m3u8 += `#EXTINF:60.0,\n${url}\n`;
+    } else {
+      const base = `${req.protocol}://${req.get('host')}`;
+      for (const f of tsFiles) {
+        m3u8 += `#EXTINF:60.0,\n${base}/api/recordings/segment?key=${encodeURIComponent(f.Key)}\n`;
+      }
     }
     m3u8 += '#EXT-X-ENDLIST\n';
     res.type('application/vnd.apple.mpegurl').send(m3u8);
@@ -99,7 +120,7 @@ app.get('/api/recordings/playlist', requireR2, async (req, res) => {
   }
 });
 
-/** Proxy de segmento .ts do R2 (evita CORS) */
+/** Proxy de segmento (quando USE_PRESIGNED=0) */
 app.get('/api/recordings/segment', requireR2, async (req, res) => {
   try {
     const key = req.query.key;

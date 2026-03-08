@@ -60,3 +60,16 @@ As transmissões são gravadas automaticamente e enviadas para Cloudflare R2.
 4. O sync roda a cada 60 segundos; a aba **Gravações** no player lista e reproduz as transmissões gravadas
 
 **Estrutura no R2:** `recordings/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS/*.ts`
+
+### Gravações não carregam no player?
+
+**Padrão:** a API faz proxy dos segmentos (sem CORS).
+
+**Alternativa (URLs diretas do R2):** se o proxy falhar, use `USE_PRESIGNED=1` no `.env` e configure CORS no bucket R2:
+
+1. R2 → seu bucket → **Settings** → **CORS Policy**
+2. Cole:
+```json
+[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAgeSeconds":3600}]
+```
+3. No `.env`: `USE_PRESIGNED=1`
