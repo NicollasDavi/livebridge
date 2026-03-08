@@ -17,8 +17,8 @@ hlsAddress: :8888
 hlsAllowOrigins: ['*']
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 5
-hlsSegmentDuration: 2s
+hlsSegmentCount: 2
+hlsSegmentDuration: 1s
 hlsSegmentMaxSize: 50M
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
