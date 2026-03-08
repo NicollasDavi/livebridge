@@ -1,7 +1,6 @@
 import express from 'express';
 import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
-import { Readable } from 'stream';
 import cors from 'cors';
 
 const app = express();
@@ -79,12 +78,18 @@ app.get('/api/recordings/playlist', requireR2, async (req, res) => {
       Prefix: prefix
     }));
     const tsFiles = Contents.filter(o => o.Key && o.Key.endsWith('.ts'))
-      .sort((a, b) => (a.Key || '').localeCompare(b.Key || ''));
+      .sort((a, b) => {
+        const ka = (a.Key || '').split('/').pop() || '';
+        const kb = (b.Key || '').split('/').pop() || '';
+        const na = parseInt(ka, 10);
+        const nb = parseInt(kb, 10);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return ka.localeCompare(kb);
+      });
     if (tsFiles.length === 0) return res.status(404).send('Nenhum segmento encontrado');
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
     let m3u8 = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:60\n#EXT-X-MEDIA-SEQUENCE:0\n';
     for (const f of tsFiles) {
-      m3u8 += `#EXTINF:60.0,\n${baseUrl}/api/recordings/segment?key=${encodeURIComponent(f.Key)}\n`;
+      m3u8 += `#EXTINF:60.0,\n/api/recordings/segment?key=${encodeURIComponent(f.Key)}\n`;
     }
     m3u8 += '#EXT-X-ENDLIST\n';
     res.type('application/vnd.apple.mpegurl').send(m3u8);
@@ -101,8 +106,14 @@ app.get('/api/recordings/segment', requireR2, async (req, res) => {
     if (!key) return res.status(400).send('key required');
     const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
     res.set('Content-Type', 'video/mp2t');
-    const stream = obj.Body instanceof Readable ? obj.Body : Readable.from(obj.Body);
-    stream.pipe(res);
+    if (obj.ContentLength) res.set('Content-Length', String(obj.ContentLength));
+    const body = obj.Body;
+    if (body && typeof body.pipe === 'function') {
+      body.pipe(res);
+    } else {
+      const buf = Buffer.from(await body.transformToByteArray());
+      res.send(buf);
+    }
   } catch (e) {
     console.error(e);
     res.status(500).send(e.message);

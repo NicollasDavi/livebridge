@@ -358,9 +358,9 @@
                 hls.on(Hls.Events.ERROR, (e, d) => {
                     if (d.fatal) {
                         statusEl.textContent = 'Erro';
-                        const msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
-                            ? (isVod ? 'Gravação não encontrada.' : 'Stream não encontrado. Inicie a transmissão no OBS primeiro.')
-                            : (d.details || 'Erro no stream.') + (d.reason ? ' ' + d.reason : '');
+                        let msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
+                            ? (isVod ? 'Gravação não encontrada ou segmento com erro.' : 'Stream não encontrado. Inicie a transmissão no OBS primeiro.')
+                            : (d.details || 'Erro') + (d.reason ? ': ' + d.reason : '') + (d.response ? ' (HTTP ' + d.response.code + ')' : '');
                         showError(msg);
                     }
                 });
