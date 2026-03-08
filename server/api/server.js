@@ -13,16 +13,17 @@ const R2_SECRET_KEY = process.env.R2_SECRET_KEY;
 const R2_BUCKET = process.env.R2_BUCKET || 'livebridge';
 const R2_PREFIX = 'recordings/';
 
-if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY || !R2_SECRET_KEY) {
-  console.error('Configure R2_ACCOUNT_ID, R2_ACCESS_KEY e R2_SECRET_KEY');
-  process.exit(1);
-}
-
-const s3 = new S3Client({
+const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
+const s3 = hasR2 ? new S3Client({
   region: 'auto',
   endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY }
-});
+}) : null;
+
+function requireR2(req, res, next) {
+  if (!hasR2) return res.status(503).json({ error: 'R2 não configurado. Defina R2_ACCOUNT_ID, R2_ACCESS_KEY e R2_SECRET_KEY no .env' });
+  next();
+}
 
 /** Extrai path (ex: live/teste), session (ex: 2025-03-08_12-00-00) e filename de uma key R2 */
 function parseKey(key) {
@@ -37,7 +38,7 @@ function parseKey(key) {
 }
 
 /** Lista gravações agrupadas por sessão */
-app.get('/api/recordings', async (req, res) => {
+app.get('/api/recordings', requireR2, async (req, res) => {
   try {
     const { Contents = [] } = await s3.send(new ListObjectsV2Command({
       Bucket: R2_BUCKET,
@@ -68,7 +69,7 @@ app.get('/api/recordings', async (req, res) => {
 });
 
 /** Retorna playlist HLS com URLs presignadas (path e session em query) */
-app.get('/api/recordings/playlist', async (req, res) => {
+app.get('/api/recordings/playlist', requireR2, async (req, res) => {
   try {
     const { path, session } = req.query;
     if (!path || !session) return res.status(400).send('path e session obrigatórios');
@@ -99,4 +100,7 @@ app.get('/api/recordings/playlist', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`API rodando na porta ${PORT}`);
+  if (!hasR2) console.log('R2 não configurado — aba Gravações desabilitada');
+});

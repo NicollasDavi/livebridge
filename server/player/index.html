@@ -291,10 +291,15 @@
             empty.textContent = 'Carregando...';
             empty.classList.remove('hidden');
             fetch('/api/recordings')
-                .then(r => r.json())
-                .then(recordings => {
+                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(({ ok, data: recordings }) => {
                     empty.classList.add('hidden');
-                    if (!recordings.length) {
+                    if (!ok && recordings?.error) {
+                        empty.textContent = recordings.error;
+                        empty.classList.remove('hidden');
+                        return;
+                    }
+                    if (!recordings?.length) {
                         empty.textContent = 'Nenhuma gravação encontrada.';
                         empty.classList.remove('hidden');
                         return;
