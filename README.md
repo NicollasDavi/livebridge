@@ -28,6 +28,7 @@ docker compose up -d
 |--------|------------------|
 | 1935   | RTMP (OBS)       |
 | 3000   | API (gravações)  |
+| 8080   | Merge (concatena vídeos) |
 | 8081   | Player web       |
 | 8888   | HLS              |
 
@@ -50,24 +51,14 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 - **Intervalo de keyframe:** 1–2 segundos
 - **Bitrate:** 2500–6000 kbps
 
-## Gravação (estilo YouTube)
+## Gravação no R2 (Cloudflare)
 
-Ao terminar a live, os segmentos são unidos em um único `.mp4` e enviados ao R2.
+1. Crie um bucket no R2 e configure `.env` com `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`
+2. Durante a live, o MediaMTX grava segmentos localmente
+3. Ao encerrar a transmissão, o **serviço merge** (após ~2 min sem novos segmentos) concatena tudo em um `.mp4` e envia ao R2
+4. A aba **Gravações** lista e reproduz os vídeos completos
 
-- **Durante:** MediaMTX grava segmentos `.ts`
-- **Ao parar:** Hook `runOnNotReady` chama o serviço de merge
-- **Merge:** ffmpeg concatena, gera UUID, envia ao R2 como `recordings/videos/{uuid}.mp4`
-
-## R2 (Cloudflare)
-
-As gravações (`.mp4`) são enviadas automaticamente para Cloudflare R2.
-
-1. Crie um bucket "livebridge" no R2
-2. **Rclone** — credenciais em `server/rclone/rclone.conf` (copie de `rclone.conf.example`)
-3. **API de gravações** — crie `server/.env` com `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY` (veja `server/.env.example`)
-4. O sync roda a cada 60 segundos; a aba **Gravações** no player lista e reproduz as transmissões gravadas
-
-**Estrutura no R2:** `recordings/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS/*.ts`
+**Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 
 ### Gravações não carregam no player?
 

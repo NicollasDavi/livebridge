@@ -313,28 +313,24 @@
                         return;
                     }
                     recordings.forEach(rec => {
+                        const streamLabel = rec.path.split('/').pop() || rec.path;
                         const el = document.createElement('div');
                         el.className = 'rec-item';
-                        const label = rec.type === 'mp4' ? (rec.date || rec.id) : (rec.path?.split('/').pop() || rec.path);
-                        const dbRef = rec.type === 'mp4' ? `id: ${rec.id}` : (
-                            /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session)
-                                ? `path: ${rec.path} | session: ${rec.session}`
-                                : `path: ${rec.path}/${rec.session} (sem pasta de data)`
-                        );
+                                                const isTimestamp = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session);
+                        const dbRef = isTimestamp
+                            ? `path: ${rec.path} | session: ${rec.session}`
+                            : `path: ${rec.path}/${rec.session} (sem pasta de data)`;
                         el.innerHTML = `
                             <span class="info">
-                                ${label} <small>${rec.date}</small>
+                                ${streamLabel} <small>${rec.date}</small>
                                 <br><small class="session-id">${dbRef}</small>
                             </span>
                             <button type="button" class="btn btn-play">Assistir</button>
                         `;
                         el.querySelector('.btn').addEventListener('click', () => {
-                            if (rec.type === 'mp4') {
-                                initMP4Player(label, `/api/recordings/video/${rec.id}`);
-                            } else {
-                                const url = `/api/recordings/playlist?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
-                                initHLSPlayer(label, url, true);
-                            }
+                            const url = `/api/recordings/video?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
+                            console.log('[LiveBridge] Clicou Assistir gravação', { path: rec.path, session: rec.session, url });
+                            initVodPlayer(streamLabel, url);
                         });
                         list.appendChild(el);
                     });
@@ -345,21 +341,27 @@
                 });
         }
 
-        function initMP4Player(label, url) {
-            if (hls) { hls.destroy(); hls = null; }
+        function initVodPlayer(streamName, videoUrl) {
             isVodMode = true;
-            video.src = url;
-            video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
-            video.onseeked = updateSeekBar;
-            statusEl.textContent = 'Carregando...';
+            if (hls) { hls.destroy(); hls = null; }
+            statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
             hlsControls.classList.remove('hidden');
-            var btnLive = document.querySelector('.btn-live');
-            if (btnLive) btnLive.classList.add('hidden');
+            document.querySelector('.btn-live')?.classList.add('hidden');
+            video.src = videoUrl;
+            video.onloadedmetadata = () => {
+                statusEl.textContent = 'Gravação pronta';
+                statusEl.classList.add('live');
+                video.play().catch(() => {});
+            };
+            video.onerror = () => {
+                statusEl.textContent = 'Erro';
+                showError('Não foi possível carregar o vídeo.');
+            };
+            video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
+            video.onseeked = updateSeekBar;
             document.getElementById('playerWrap').classList.remove('hidden');
             formWrap.classList.add('hidden');
-            video.play().catch(() => {});
-            video.onloadedmetadata = () => { statusEl.textContent = 'Gravação pronta'; };
         }
 
         function initHLSPlayer(streamName, hlsUrl, isVod = false) {

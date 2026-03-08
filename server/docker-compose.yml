@@ -1,7 +1,6 @@
 services:
   mediamtx:
-    build: ./mediamtx
-    image: livebridge-mediamtx:latest
+    image: bluenviron/mediamtx:latest
     container_name: livebridge-mediamtx
     restart: unless-stopped
     volumes:
@@ -15,9 +14,8 @@ services:
     build: ./merge
     container_name: livebridge-merge
     restart: unless-stopped
-    depends_on:
-      - mediamtx
     environment:
+      RECORDINGS_DIR: /recordings
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
       R2_SECRET_KEY: ${R2_SECRET_KEY:-}
@@ -25,7 +23,7 @@ services:
     volumes:
       - ./recordings:/recordings
     ports:
-      - "3001:3001"
+      - "8080:8080"
 
   api:
     build: ./api

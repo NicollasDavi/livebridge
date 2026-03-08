@@ -5,8 +5,6 @@ server/stream/*
 # Gravações (upload para R2)
 server/recordings/*
 !server/recordings/.gitkeep
-!server/recordings/merged/
-!server/recordings/merged/.gitkeep
 
 # Node
 node_modules/
