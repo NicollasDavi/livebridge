@@ -3,17 +3,17 @@ import { execSync } from 'child_process';
 import { readdirSync, statSync, writeFileSync, unlinkSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createReadStream } from 'fs';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 
 const app = express();
 app.use(express.json());
 
-const RECORDINGS_DIR = process.env.RECORDINGS_DIR || '/recordings';
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY;
-const R2_SECRET_KEY = process.env.R2_SECRET_KEY;
-const R2_BUCKET = process.env.R2_BUCKET || 'livebridge';
+const RECORDINGS_DIR = (process.env.RECORDINGS_DIR || '/recordings').trim();
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID?.trim();
+const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY?.trim();
+const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
+const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const R2_VIDEOS_PREFIX = 'recordings/videos/';
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
@@ -116,6 +116,48 @@ app.post('/merge', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Debug: lista sessões locais e status R2
+function scanRecordings() {
+  const result = {
+    recordingsDir: RECORDINGS_DIR,
+    hasR2,
+    r2Bucket: R2_BUCKET,
+    r2AccountId: R2_ACCOUNT_ID ? '***' + R2_ACCOUNT_ID.slice(-4) : null,
+    sessions: [],
+    error: null
+  };
+  try {
+    const pathBase = join(RECORDINGS_DIR, 'live');
+    if (!existsSync(pathBase)) {
+      result.error = `Pasta ${pathBase} não existe`;
+      return result;
+    }
+    const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
+    for (const s of streams) {
+      const streamPath = join(pathBase, s.name);
+      const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
+      for (const sess of sessions) {
+        const sessionPath = join(streamPath, sess.name);
+        const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
+        const stat = statSync(sessionPath);
+        const ageSec = Math.round((Date.now() - stat.mtimeMs) / 1000);
+        result.sessions.push({
+          path: `live/${s.name}`,
+          session: sess.name,
+          tsCount: tsFiles.length,
+          ageSeconds: ageSec,
+          stale: ageSec >= 120
+        });
+      }
+    }
+  } catch (e) {
+    result.error = e.message;
+  }
+  return result;
+}
+
+app.get('/debug', (req, res) => res.json(scanRecordings()));
+
 const STALE_MS = 2 * 60 * 1000;
 const processedDirs = new Set();
 
@@ -133,15 +175,24 @@ function findStaleSessions() {
         if (processedDirs.has(key)) continue;
         const stat = statSync(sessionPath);
         const age = Date.now() - stat.mtimeMs;
-        if (age < STALE_MS) continue;
         const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
         if (tsFiles.length === 0) continue;
+        if (age < STALE_MS) continue;
         const mtxPath = `live/${s.name}`;
         processedDirs.add(key);
         console.log('[merge] Sessão finalizada detectada:', mtxPath, sess.name);
         mergeAndUpload(mtxPath, sess.name).then(r => {
-          if (r.ok) processedDirs.delete(key);
-        }).catch(() => processedDirs.delete(key));
+          if (r.ok) {
+            processedDirs.delete(key);
+            console.log('[merge] Upload OK:', r.key);
+          } else {
+            processedDirs.delete(key);  // permite retentar na próxima varredura
+            console.warn('[merge] Falhou:', r.reason);
+          }
+        }).catch(e => {
+          processedDirs.delete(key);
+          console.error('[merge] Erro:', e.message);
+        });
       }
     }
   } catch (e) {
@@ -153,4 +204,13 @@ setInterval(findStaleSessions, 30000);
 setTimeout(findStaleSessions, 5000);
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Merge service rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Merge service rodando na porta ${PORT}`);
+  console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
+  if (hasR2) {
+    s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, MaxKeys: 1 }))
+      .then(() => console.log(`[merge] R2 bucket "${R2_BUCKET}" acessível`))
+      .catch(e => console.error('[merge] R2 inacessível:', e?.message || e));
+  }
+  console.log(`[merge] Aguardando sessões finalizadas há 2+ min em ${RECORDINGS_DIR}/live/`);
+});
