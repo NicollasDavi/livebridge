@@ -1,7 +1,7 @@
 import express from 'express';
 import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Client } from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
 import cors from 'cors';
 
 const app = express();
@@ -68,7 +68,7 @@ app.get('/api/recordings', requireR2, async (req, res) => {
   }
 });
 
-/** Retorna playlist HLS com URLs presignadas (path e session em query) */
+/** Retorna playlist HLS (segmentos via proxy para evitar CORS no R2) */
 app.get('/api/recordings/playlist', requireR2, async (req, res) => {
   try {
     const { path, session } = req.query;
@@ -81,18 +81,28 @@ app.get('/api/recordings/playlist', requireR2, async (req, res) => {
     const tsFiles = Contents.filter(o => o.Key && o.Key.endsWith('.ts'))
       .sort((a, b) => (a.Key || '').localeCompare(b.Key || ''));
     if (tsFiles.length === 0) return res.status(404).send('Nenhum segmento encontrado');
-    const urls = await Promise.all(tsFiles.map(async (f) => {
-      return getSignedUrl(s3, new GetObjectCommand({
-        Bucket: R2_BUCKET,
-        Key: f.Key
-      }), { expiresIn: 3600 });
-    }));
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     let m3u8 = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:60\n#EXT-X-MEDIA-SEQUENCE:0\n';
-    for (const url of urls) {
-      m3u8 += `#EXTINF:60.0,\n${url}\n`;
+    for (const f of tsFiles) {
+      m3u8 += `#EXTINF:60.0,\n${baseUrl}/api/recordings/segment?key=${encodeURIComponent(f.Key)}\n`;
     }
     m3u8 += '#EXT-X-ENDLIST\n';
     res.type('application/vnd.apple.mpegurl').send(m3u8);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send(e.message);
+  }
+});
+
+/** Proxy de segmento .ts do R2 (evita CORS) */
+app.get('/api/recordings/segment', requireR2, async (req, res) => {
+  try {
+    const key = req.query.key;
+    if (!key) return res.status(400).send('key required');
+    const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    res.set('Content-Type', 'video/mp2t');
+    const stream = obj.Body instanceof Readable ? obj.Body : Readable.from(obj.Body);
+    stream.pipe(res);
   } catch (e) {
     console.error(e);
     res.status(500).send(e.message);
