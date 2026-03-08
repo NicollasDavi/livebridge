@@ -163,7 +163,7 @@
         let hls = null;
 
         function getWebRTCUrl(name) {
-            return 'http://' + host + ':8889/live/' + encodeURIComponent(name);
+            return 'http://' + host + ':8889/live_w/' + encodeURIComponent(name);
         }
         function getHLSUrl(name) {
             return 'http://' + host + ':8888/live/' + encodeURIComponent(name) + '/index.m3u8';
@@ -227,7 +227,9 @@
                 hls = new Hls({
                     liveSyncDurationCount: 1,
                     liveMaxLatencyDurationCount: 2,
-                    liveDurationInfinity: true
+                    liveDurationInfinity: true,
+                    maxBufferLength: 10,
+                    maxMaxBufferLength: 20
                 });
                 hls.loadSource(url);
                 hls.attachMedia(video);

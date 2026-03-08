@@ -42,7 +42,7 @@ docker compose up -d
 ## OBS — configuração recomendada
 
 - **Encoder:** x264 ou NVENC (H.264) — evite HEVC/AV1
-- **Intervalo de keyframe:** 2 segundos
+- **Intervalo de keyframe:** 1–2 segundos (importante para baixa latência)
 - **Bitrate:** 2500–6000 kbps
 
 ## Estrutura

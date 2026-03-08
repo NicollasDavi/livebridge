@@ -1,6 +1,6 @@
 services:
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    image: bluenviron/mediamtx:latest-ffmpeg
     container_name: livebridge-mediamtx
     restart: unless-stopped
     environment:

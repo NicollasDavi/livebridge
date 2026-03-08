@@ -10,14 +10,15 @@ srt: false
 rtmp: true
 rtmpAddress: :1935
 
-# HLS Low-Latency (fallback - pausa/voltar)
+# HLS Low-Latency (~5-10s de delay)
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ['*']
-hlsVariant: mpegts
+hlsVariant: lowLatency
 hlsAlwaysRemux: true
-hlsSegmentCount: 7
-hlsSegmentDuration: 2s
+hlsSegmentCount: 4
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
 hlsSegmentMaxSize: 50M
 
 # WebRTC - < 1 segundo de latência
@@ -33,7 +34,11 @@ webrtcSTUNGatherTimeout: 5s
 webrtcHandshakeTimeout: 10s
 webrtcTrackGatherTimeout: 2s
 
-# Path para rtmp://IP:1935/live/QUALQUERNOME
+# Paths: live/xxx = OBS publica | live_w/xxx = transcodificado para WebRTC (com áudio)
 paths:
-  "~^live/.+":
+  "~^live/(.+)$":
+    source: publisher
+    runOnReady: ffmpeg -i rtmp://localhost:1935/live/$G1 -c:v copy -c:a libopus -b:a 128k -f flv rtmp://localhost:1935/live_w/$G1
+    runOnReadyRestart: yes
+  "~^live_w/(.+)$":
     source: publisher
