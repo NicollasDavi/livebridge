@@ -14,11 +14,10 @@ rtmpAddress: :1935
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ['*']
-hlsVariant: lowLatency
+hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 5
-hlsSegmentDuration: 1s
-hlsPartDuration: 150ms
+hlsSegmentCount: 7
+hlsSegmentDuration: 2s
 hlsSegmentMaxSize: 50M
 
 # WebRTC - < 1 segundo de latência

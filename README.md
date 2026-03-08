@@ -39,6 +39,12 @@ docker compose up -d
 
 **Firewall:** libere **8189/UDP** e **8189/TCP** para o WebRTC funcionar.
 
+## OBS — configuração recomendada
+
+- **Encoder:** x264 ou NVENC (H.264) — evite HEVC/AV1
+- **Intervalo de keyframe:** 2 segundos
+- **Bitrate:** 2500–6000 kbps
+
 ## Estrutura
 
 ```

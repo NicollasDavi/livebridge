@@ -138,8 +138,8 @@
             <label for="streamName">Nome do stream</label>
             <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
             <div class="btns">
+                <button class="btn btn-play" id="btnHLS">Assistir (HLS)</button>
                 <button class="btn btn-webrtc" id="btnWebRTC">Assistir ao vivo (&lt;1s)</button>
-                <button class="btn btn-play" id="btnHLS">Assistir com pausa/voltar</button>
             </div>
             <p class="hint">WebRTC: latência mínima, sempre ao vivo. HLS: pode pausar e voltar ~30s.</p>
             <div class="error hidden" id="error"></div>
@@ -187,7 +187,7 @@
         });
 
         streamNameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') btnHLS.click();
+            if (e.key === 'Enter') { e.preventDefault(); btnHLS.click(); }
         });
 
         function updateTime() {
@@ -239,7 +239,10 @@
                 hls.on(Hls.Events.ERROR, (e, d) => {
                     if (d.fatal) {
                         statusEl.textContent = 'Erro';
-                        showError(d.type === Hls.ErrorTypes.NETWORK_ERROR ? 'Stream não encontrado.' : 'Erro no stream.');
+                        const msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
+                            ? 'Stream não encontrado. Inicie a transmissão no OBS primeiro.'
+                            : (d.details || 'Erro no stream.') + (d.reason ? ' ' + d.reason : '');
+                        showError(msg);
                     }
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
