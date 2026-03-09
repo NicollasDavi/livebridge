@@ -45,11 +45,20 @@ Se o OBS der **"conexão expirou"**, libere as portas no **hPanel → VPS → Fi
 
 Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 
-## OBS — configuração
+## OBS — configuração para transmissão de aula
 
-- **Encoder:** x264 ou NVENC (H.264)
-- **Intervalo de keyframe:** 1–2 segundos
-- **Bitrate:** 2500–6000 kbps
+| Parâmetro | Valor | Motivo |
+|-----------|-------|--------|
+| **Encoder** | NVENC (GPU) ou x264 | H.264, compatível |
+| **Intervalo de keyframe** | 2 segundos | Menor latência |
+| **Resolução** | 1280×720 (720p) | Equilíbrio qualidade/tamanho |
+| **Bitrate vídeo** | 4500–5500 kbps | Texto legível, tela clara |
+| **Bitrate áudio** | **160 kbps** | Voz clara (prioridade na aula) |
+| **Sample rate áudio** | 48 kHz | Padrão para streaming |
+
+**Se usar 1080p:** bitrate vídeo 6000–8000 kbps.
+
+O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e arquivos menores.
 
 ## Gravação no R2 (Cloudflare)
 
@@ -60,7 +69,7 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 
-**Compressão:** por padrão o merge re-encoda com H.264 CRF 21 (boa qualidade, ~40–50% menor). Para desativar: `COMPRESS_VIDEO=0` no `.env`.
+**Compressão (otimizada para aula):** H.264 CRF 18 (vídeo), AAC 96k (áudio), preset slow, tune animation. Alta qualidade, menor tamanho. Desativar: `COMPRESS_VIDEO=0` no `.env`.
 
 ### Gravações não carregam no player?
 

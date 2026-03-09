@@ -73,7 +73,7 @@ function mergeAndUpload(path, sessionNameOrDir = null) {
   writeFileSync(listPath, listContent);
   const outPath = join(sessionDir, `${sessionName}.mp4`);
   const ffmpegCmd = COMPRESS_VIDEO
-    ? `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf 21 -preset medium -c:a aac -b:a 128k -movflags +faststart "${outPath}"`
+    ? `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf 18 -preset slow -tune animation -c:a aac -b:a 96k -aac_coder twoloop -movflags +faststart "${outPath}"`
     : `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`;
   try {
     execSync(ffmpegCmd, {
@@ -273,7 +273,7 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Merge service rodando na porta ${PORT}`);
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
-  console.log(`[merge] Compressão: ${COMPRESS_VIDEO ? 'H.264 CRF 21 (boa qualidade, menor tamanho)' : 'copy (rápido, tamanho original)'}`);
+  console.log(`[merge] Compressão: ${COMPRESS_VIDEO ? 'H.264 CRF 18 + AAC 96k (aula)' : 'copy (rápido, tamanho original)'}`);
   if (hasR2) {
     s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, MaxKeys: 1 }))
       .then(() => console.log(`[merge] R2 bucket "${R2_BUCKET}" acessível`))
