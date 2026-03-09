@@ -3,8 +3,9 @@ import { execSync } from 'child_process';
 import { readdirSync, statSync, writeFileSync, unlinkSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createReadStream } from 'fs';
-import { PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 
 const app = express();
 app.use(express.json());
@@ -26,7 +27,7 @@ const s3 = hasR2 ? new S3Client({
   credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY }
 }) : null;
 
-function mergeAndUpload(path, sessionNameOrDir = null) {
+async function mergeAndUpload(path, sessionNameOrDir = null) {
   let sessionDir, sessionName, deleteFolderAfter = true;
   if (sessionNameOrDir) {
     if (typeof sessionNameOrDir === 'string' && sessionNameOrDir.includes('/')) {
@@ -93,27 +94,44 @@ function mergeAndUpload(path, sessionNameOrDir = null) {
     return { ok: true, local: outPath };
   }
   const r2Key = `${R2_VIDEOS_PREFIX}${path}/${sessionName}.mp4`;
-  const stream = createReadStream(outPath);
-  const uploadPromise = s3.send(new PutObjectCommand({
-    Bucket: R2_BUCKET,
-    Key: r2Key,
-    Body: stream,
-    ContentType: 'video/mp4'
-  }));
-  return uploadPromise.then(() => {
-    for (const f of tsFiles) {
-      try { unlinkSync(join(sessionDir, f)); } catch (_) {}
+  const MAX_RETRIES = 3;
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 1) console.log(`[merge] Tentativa ${attempt}/${MAX_RETRIES} de upload...`);
+      const upload = new Upload({
+        client: s3,
+        params: {
+          Bucket: R2_BUCKET,
+          Key: r2Key,
+          Body: createReadStream(outPath),
+          ContentType: 'video/mp4'
+        },
+        queueSize: 4,
+        partSize: 100 * 1024 * 1024, // 100MB por parte (multipart)
+        leavePartsOnError: false
+      });
+      await upload.done();
+      console.log('[merge] Upload concluído:', r2Key);
+      for (const f of tsFiles) {
+        try { unlinkSync(join(sessionDir, f)); } catch (_) {}
+      }
+      try { unlinkSync(outPath); } catch (_) {}
+      if (deleteFolderAfter) {
+        try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
+      }
+      return { ok: true, key: r2Key };
+    } catch (e) {
+      lastError = e;
+      console.error('[merge] Upload R2 falhou (tentativa ' + attempt + '):', e?.message || e);
+      if (attempt < MAX_RETRIES) {
+        const delay = attempt * 5000;
+        console.log(`[merge] Aguardando ${delay / 1000}s antes de tentar novamente...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
-    try { unlinkSync(outPath); } catch (_) {}
-    if (deleteFolderAfter) {
-      try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
-    }
-    console.log('[merge] Upload concluído:', r2Key);
-    return { ok: true, key: r2Key };
-  }).catch(e => {
-    console.error('[merge] Upload R2 falhou', e);
-    return { ok: false, reason: 'upload_failed' };
-  });
+  }
+  return { ok: false, reason: 'upload_failed' };
 }
 
 app.post('/merge', async (req, res) => {
