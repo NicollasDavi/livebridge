@@ -566,7 +566,13 @@
             empty.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg><p>Carregando...</p>';
             empty.classList.remove('hidden');
             fetch('/api/recordings')
-                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(r => {
+                    const ct = r.headers.get('content-type') || '';
+                    if (!ct.includes('application/json')) {
+                        return r.text().then(t => { throw new Error('API retornou HTML em vez de JSON. Verifique se a API está rodando (porta 3000).'); });
+                    }
+                    return r.json().then(data => ({ ok: r.ok, data }));
+                })
                 .then(({ ok, data: recordings }) => {
                     empty.classList.add('hidden');
                     if (!ok && recordings?.error) {
