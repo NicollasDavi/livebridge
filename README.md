@@ -66,8 +66,11 @@ O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e 
 2. Durante a live, o MediaMTX grava segmentos localmente
 3. Ao encerrar a transmissão, o **serviço merge** (após ~2 min sem novos segmentos) concatena tudo em um `.mp4` e envia ao R2
 4. A aba **Gravações** lista e reproduz os vídeos completos
+5. É possível **dar nomes customizados** às aulas gravadas: clique no ícone de lápis ao lado de cada gravação
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
+
+**Nomes customizados:** Os títulos das aulas são salvos em `server/api/data/recordings-names.json` (volume montado no Docker).
 
 **Compressão (otimizada para aula):** H.264 CRF 18 (vídeo), AAC 96k (áudio), preset slow, tune animation. Alta qualidade, menor tamanho. Desativar: `COMPRESS_VIDEO=0` no `.env`.
 

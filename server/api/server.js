@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -6,6 +8,29 @@ import cors from 'cors';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+const DATA_DIR = path.join(process.cwd(), 'data'); // em Docker: /app/data (volume montado)
+const NAMES_FILE = path.join(DATA_DIR, 'recordings-names.json');
+
+function loadNames() {
+  try {
+    const data = fs.readFileSync(NAMES_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+function saveNames(names) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Erro ao salvar nomes:', e);
+    throw e;
+  }
+}
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY;
@@ -43,20 +68,25 @@ app.get('/api/recordings', requireR2, async (req, res) => {
         const parts = rest.split('/');
         if (parts.length < 2) continue;
         const filename = parts.pop();
-        const path = parts.join('/');
+        const recPath = parts.join('/');
         const session = filename.replace('.mp4', '');
         list.push({
-          path,
+          path: recPath,
           session,
           key: obj.Key,
           date: session.replace(/_/g, ' '),
-          id: `${path}|${session}`
+          id: `${recPath}|${session}`
         });
       }
       continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
     } while (continuationToken);
     list.sort((a, b) => b.session.localeCompare(a.session));
-    res.json(list);
+    const names = loadNames();
+    const result = list.map(rec => ({
+      ...rec,
+      name: names[rec.id] || null
+    }));
+    res.json(result);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
@@ -82,6 +112,25 @@ app.get('/api/recordings/video', requireR2, async (req, res) => {
     } else {
       res.send(Buffer.from(await body.transformToByteArray()));
     }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Atualiza nome customizado de uma gravação */
+app.put('/api/recordings/name', requireR2, async (req, res) => {
+  try {
+    const { id, name } = req.body;
+    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id obrigatório' });
+    const names = loadNames();
+    if (name && typeof name === 'string' && name.trim()) {
+      names[id] = name.trim();
+    } else {
+      delete names[id];
+    }
+    saveNames(names);
+    res.json({ ok: true, name: names[id] || null });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });

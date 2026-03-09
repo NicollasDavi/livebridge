@@ -3,46 +3,199 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveBridge — Player ao vivo</title>
+    <title>LiveBridge — Plataforma de Aulas ao Vivo</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0d0d0f;
-            --surface: #16161a;
-            --accent: #00d4aa;
-            --accent-dim: rgba(0, 212, 170, 0.3);
-            --text: #e4e4e7;
-            --text-muted: #71717a;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --sidebar: #1e293b;
+            --sidebar-hover: #334155;
+            --accent: #0ea5e9;
+            --accent-hover: #0284c7;
+            --accent-dim: rgba(14, 165, 233, 0.12);
+            --text: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --danger: #ef4444;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Outfit', sans-serif;
+            font-family: 'Inter', sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 1.5rem;
         }
-        .container { width: 100%; max-width: 900px; }
-        h1 {
+        .sidebar {
+            width: 260px;
+            min-width: 260px;
+            background: var(--sidebar);
+            color: #e2e8f0;
+            padding: 1.5rem 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-logo {
+            padding: 0 1.5rem 1.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            margin-bottom: 1rem;
+        }
+        .sidebar-logo h1 {
             font-size: 1.25rem;
             font-weight: 700;
-            margin-bottom: 1rem;
-            color: var(--accent);
-            font-family: 'JetBrains Mono', monospace;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
+        .sidebar-logo .icon {
+            width: 28px;
+            height: 28px;
+            background: linear-gradient(135deg, var(--accent), #06b6d4);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1.5rem;
+            color: #94a3b8;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            font-family: inherit;
+            font-size: 0.95rem;
+            text-align: left;
+        }
+        .nav-item:hover { background: var(--sidebar-hover); color: #fff; }
+        .nav-item.active { background: var(--sidebar-hover); color: var(--accent); }
+        .nav-item svg { flex-shrink: 0; opacity: 0.8; }
+        .nav-item.active svg { opacity: 1; }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .header {
+            background: var(--surface);
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h2 { font-size: 1.125rem; font-weight: 600; color: var(--text); }
+        .content {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+        }
+        .dashboard-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+        .card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+        .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .card-live .card-icon { background: rgba(239, 68, 68, 0.12); }
+        .card-recordings .card-icon { background: var(--accent-dim); }
+        .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.25rem; }
+        .card p { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem; }
+        .card .btn { width: 100%; justify-content: center; }
+        .form-wrap {
+            max-width: 480px;
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 2rem;
+            border: 1px solid var(--border);
+        }
+        .form-wrap label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; font-weight: 500; color: var(--text); }
+        .form-wrap input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .form-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+        .form-wrap .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; }
+        .btn {
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            padding: 0.625rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-live {
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        .btn-live:hover { background: rgba(14, 165, 233, 0.2); }
+        .btn-live::before { content: "● "; color: var(--danger); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 50% { opacity: 0.5; } }
         .player-wrap {
             background: var(--surface);
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            border: 1px solid var(--border);
         }
+        .player-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .player-header h3 { font-size: 1rem; font-weight: 600; }
+        .btn-back {
+            background: var(--bg);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+        .btn-back:hover { background: var(--border); color: var(--text); }
         .video-container { position: relative; aspect-ratio: 16/9; background: #000; }
         video { width: 100%; height: 100%; display: block; }
         .controls {
@@ -52,34 +205,14 @@
             align-items: center;
             gap: 1rem;
         }
-        .btn {
-            font-family: 'Outfit', sans-serif;
-            font-weight: 600;
-            padding: 0.5rem 1rem;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.2s;
-        }
-        .btn-play { background: var(--accent); color: var(--bg); }
-        .btn-play:hover { background: #00e6b8; }
-        .btn-live {
-            background: var(--accent-dim);
-            color: var(--accent);
-            border: 1px solid var(--accent);
-        }
-        .btn-live:hover { background: rgba(0, 212, 170, 0.2); }
-        .btn-live::before { content: "● "; color: #ef4444; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 50% { opacity: 0.5; } }
-        .btn-webrtc { background: #3b82f6; color: #fff; }
-        .btn-webrtc:hover { background: #2563eb; }
+        .btn-play { background: var(--accent); color: #fff; }
+        .btn-play:hover { background: var(--accent-hover); }
         .seek-wrap { flex: 1; min-width: 120px; display: flex; align-items: center; gap: 0.5rem; }
         input[type="range"] {
             flex: 1;
             height: 6px;
             -webkit-appearance: none;
-            background: var(--bg);
+            background: var(--border);
             border-radius: 3px;
         }
         input[type="range"]::-webkit-slider-thumb {
@@ -90,105 +223,172 @@
             cursor: pointer;
         }
         .time { font-size: 0.8rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; min-width: 4rem; }
-        .status { font-size: 0.75rem; color: var(--text-muted); padding: 0.25rem 0.5rem; background: var(--bg); border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
-        .status.live { color: var(--accent); }
-        .form-wrap {
-            margin-top: 1.5rem;
-            padding: 1.25rem;
-            background: var(--surface);
-            border-radius: 12px;
-        }
-        .form-wrap label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }
-        .form-wrap input {
-            width: 100%;
-            padding: 0.6rem 1rem;
-            background: var(--bg);
-            border: 1px solid #27272a;
-            border-radius: 8px;
-            color: var(--text);
-            font-family: 'JetBrains Mono', monospace;
+        .status { font-size: 0.75rem; color: var(--text-muted); padding: 0.25rem 0.5rem; background: var(--bg); border-radius: 6px; font-family: 'JetBrains Mono', monospace; }
+        .status.live { color: var(--success); }
+        .error {
+            color: var(--danger);
             font-size: 0.9rem;
-        }
-        .form-wrap input:focus { outline: none; border-color: var(--accent); }
-        .form-wrap .btns { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-        .form-wrap .btn { margin-top: 0; }
-        .form-wrap .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
-        .error { color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; }
-        .hidden { display: none !important; }
-        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-        .tab {
-            padding: 0.5rem 1rem;
-            border: none;
-            background: var(--bg);
-            color: var(--text-muted);
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
-            cursor: pointer;
-            font-family: 'Outfit', sans-serif;
-            font-weight: 600;
-            transition: all 0.2s;
         }
-        .tab:hover { color: var(--text); }
-        .tab.active { background: var(--accent-dim); color: var(--accent); }
-        .tab-content { margin-top: 0.5rem; }
-        .recordings-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; max-height: 200px; overflow-y: auto; }
+        .hidden { display: none !important; }
+        .recordings-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
         .rec-item {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0.6rem 1rem;
+            padding: 1rem 1.25rem;
             background: var(--bg);
             border-radius: 8px;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
         }
-        .rec-item .info { font-size: 0.9rem; font-family: 'JetBrains Mono', monospace; }
-        .rec-item .info small { color: var(--text-muted); font-size: 0.75rem; }
-        .rec-item .session-id { font-family: 'JetBrains Mono', monospace; opacity: 0.8; }
-        .rec-item .btn { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
+        .rec-item:hover { border-color: var(--accent); }
+        .rec-item .info { font-size: 0.9rem; }
+        .rec-item .info strong { display: block; margin-bottom: 0.25rem; }
+        .rec-item .info small { color: var(--text-muted); font-size: 0.8rem; }
+        .rec-item .btn { padding: 0.5rem 1rem; }
+        .rec-item .rec-actions { display: flex; gap: 0.5rem; align-items: center; }
+        .btn-icon {
+            padding: 0.5rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-icon:hover { background: var(--border); color: var(--accent); }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow: auto;
+        }
+        .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
+        .modal .btns { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+        .section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+        }
+        .empty-state svg { opacity: 0.4; margin-bottom: 1rem; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>LiveBridge</h1>
-        <div class="player-wrap hidden" id="playerWrap">
-            <div class="video-container">
-                <video id="video" playsinline controls></video>
-            </div>
-            <div class="controls" id="hlsControls">
-                <button type="button" class="btn btn-play" id="btnPlay">▶ Pausar</button>
-                <button type="button" class="btn btn-live" id="btnLive">Ir ao vivo</button>
-                <div class="seek-wrap">
-                    <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
-                    <span class="time" id="time">--:-- / ao vivo</span>
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <h1><span class="icon">📚</span> LiveBridge</h1>
+        </div>
+        <nav>
+            <button type="button" class="nav-item active" data-nav="dashboard">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Dashboard
+            </button>
+            <button type="button" class="nav-item" data-nav="live">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Aulas ao vivo
+            </button>
+            <button type="button" class="nav-item" data-nav="recordings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                Biblioteca de gravações
+            </button>
+        </nav>
+    </aside>
+    <main class="main">
+        <header class="header">
+            <h2 id="headerTitle">Dashboard</h2>
+        </header>
+        <div class="content">
+            <div class="error hidden" id="error"></div>
+            <div id="viewDashboard" class="view">
+                <div class="dashboard-cards">
+                    <div class="card card-live">
+                        <div class="card-icon">🔴</div>
+                        <h3>Aulas ao vivo</h3>
+                        <p>Assista transmissões em tempo real. Digite o nome da sala e conecte-se.</p>
+                        <button type="button" class="btn btn-primary" data-goto="live">Assistir ao vivo</button>
+                    </div>
+                    <div class="card card-recordings">
+                        <div class="card-icon">📼</div>
+                        <h3>Biblioteca de gravações</h3>
+                        <p>Acesse aulas gravadas e assista quando quiser.</p>
+                        <button type="button" class="btn btn-primary" data-goto="recordings">Ver gravações</button>
+                    </div>
                 </div>
-                <span class="status" id="status">Carregando...</span>
+            </div>
+            <div id="viewLive" class="view hidden">
+                <div class="form-wrap">
+                    <label for="streamName">Nome da sala / disciplina</label>
+                    <input type="text" id="streamName" placeholder="Ex: matematica-2024" autocomplete="off">
+                    <button type="button" class="btn btn-primary btn-live" id="btnHLS">Assistir aula ao vivo</button>
+                    <p class="hint">No OBS: intervalo de keyframe = 1 ou 2 segundos (Saída → Configuração do encoder)</p>
+                </div>
+            </div>
+            <div id="viewRecordings" class="view hidden">
+                <p class="section-title">Aulas gravadas</p>
+                <div id="recordingsList" class="recordings-list"></div>
+                <div class="empty-state" id="recordingsEmpty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    <p>Carregando gravações...</p>
+                </div>
+            </div>
+            <div id="viewPlayer" class="view hidden">
+                <div class="player-wrap" id="playerWrap">
+                    <div class="player-header">
+                        <h3 id="playerTitle">Aula ao vivo</h3>
+                        <button type="button" class="btn btn-back" id="btnBack">← Voltar</button>
+                    </div>
+                    <div class="video-container">
+                        <video id="video" playsinline controls></video>
+                    </div>
+                    <div class="controls" id="hlsControls">
+                        <button type="button" class="btn btn-play" id="btnPlay">▶ Pausar</button>
+                        <button type="button" class="btn btn-live hidden" id="btnLive">Ir ao vivo</button>
+                        <div class="seek-wrap">
+                            <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+                            <span class="time" id="time">--:-- / ao vivo</span>
+                        </div>
+                        <span class="status" id="status">Carregando...</span>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="form-wrap" id="formWrap">
-            <div class="tabs">
-                <button type="button" class="tab active" data-tab="live">Ao vivo</button>
-                <button type="button" class="tab" data-tab="recordings">Gravações</button>
+    </main>
+    <div class="modal-overlay hidden" id="nameModal">
+        <div class="modal">
+            <h3>Nome da aula</h3>
+            <label for="recNameInput">Título exibido na biblioteca</label>
+            <input type="text" id="recNameInput" placeholder="Ex: Matemática - Aula 1" style="width:100%;padding:0.75rem;margin-top:0.5rem;border:1px solid var(--border);border-radius:8px;">
+            <div class="btns">
+                <button type="button" class="btn btn-back" id="modalCancel">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="modalSave">Salvar</button>
             </div>
-            <div class="tab-content active" id="tabLive">
-                <label for="streamName">Nome do stream</label>
-                <input type="text" id="streamName" placeholder="Ex: teste" autocomplete="off">
-                <div class="btns">
-                    <button type="button" class="btn btn-play" id="btnHLS">Assistir ao vivo</button>
-                </div>
-                <p class="hint">No OBS: intervalo de keyframe = 1 ou 2 segundos (Saída → Configuração do encoder)</p>
-            </div>
-            <div class="tab-content hidden" id="tabRecordings">
-                <p class="hint">Transmissões gravadas no R2</p>
-                <div id="recordingsList" class="recordings-list"></div>
-                <p class="hint" id="recordingsEmpty">Carregando...</p>
-            </div>
-            <div class="error hidden" id="error"></div>
         </div>
     </div>
     <script>
-        window.addEventListener('error', function(e) { console.error('[LiveBridge] Window error', e.message, e.filename, e.lineno, e); });
-        window.addEventListener('unhandledrejection', function(e) { console.error('[LiveBridge] Unhandled rejection', e.reason); });
+        window.addEventListener('error', function(e) { console.error('[LiveBridge]', e.message); });
+        window.addEventListener('unhandledrejection', function(e) { console.error('[LiveBridge]', e.reason); });
         document.addEventListener('DOMContentLoaded', function() {
-        console.log('[LiveBridge] DOMContentLoaded');
         const video = document.getElementById('video');
         const btnPlay = document.getElementById('btnPlay');
         const btnLive = document.getElementById('btnLive');
@@ -196,13 +396,15 @@
         const timeEl = document.getElementById('time');
         const statusEl = document.getElementById('status');
         const hlsControls = document.getElementById('hlsControls');
-        const formWrap = document.getElementById('formWrap');
         const streamNameInput = document.getElementById('streamName');
         const btnHLS = document.getElementById('btnHLS');
         const errorEl = document.getElementById('error');
+        const btnBack = document.getElementById('btnBack');
+        const playerTitle = document.getElementById('playerTitle');
 
-        const baseUrl = window.location.origin; // mesma origem = sem CORS
+        const baseUrl = window.location.origin;
         let hls = null;
+        let isVodMode = false;
 
         function getHLSUrl(name) {
             return baseUrl + '/hls/live/' + encodeURIComponent(name) + '/index.m3u8';
@@ -211,16 +413,44 @@
         function showError(msg) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
         function hideError() { errorEl.classList.add('hidden'); }
 
-        document.getElementById('btnHLS').addEventListener('click', () => {
+        function showView(id) {
+            document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+            const el = document.getElementById('view' + id.charAt(0).toUpperCase() + id.slice(1));
+            if (el) el.classList.remove('hidden');
+            document.querySelectorAll('.nav-item').forEach(n => {
+                n.classList.toggle('active', n.dataset.nav === id);
+            });
+            const titles = { dashboard: 'Dashboard', live: 'Aulas ao vivo', recordings: 'Biblioteca de gravações', player: 'Assistindo' };
+            document.getElementById('headerTitle').textContent = titles[id] || 'LiveBridge';
+        }
+
+        document.querySelectorAll('[data-goto]').forEach(btn => {
+            btn.addEventListener('click', () => showView(btn.dataset.goto));
+        });
+        document.querySelectorAll('.nav-item').forEach(n => {
+            n.addEventListener('click', () => {
+                showView(n.dataset.nav);
+                if (n.dataset.nav === 'recordings') loadRecordings();
+            });
+        });
+
+        btnHLS.addEventListener('click', () => {
             const name = streamNameInput.value.trim();
-            console.log('[LiveBridge] Clicou Assistir ao vivo', name);
-            if (!name) { showError('Digite o nome do stream.'); return; }
+            if (!name) { showError('Digite o nome da sala.'); return; }
             hideError();
+            playerTitle.textContent = name + ' — ao vivo';
+            showView('player');
             initHLSPlayer(name);
         });
 
         streamNameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); btnHLS.click(); }
+        });
+
+        btnBack.addEventListener('click', () => {
+            if (hls) { hls.destroy(); hls = null; }
+            video.src = '';
+            showView('dashboard');
         });
 
         function updateTime() {
@@ -253,8 +483,6 @@
             seek.value = ((video.currentTime - start) / range) * 100;
         }
 
-        let isVodMode = false;
-
         btnPlay.addEventListener('click', () => {
             if (video.paused) { video.play(); btnPlay.textContent = '⏸ Pausar'; }
             else { video.pause(); btnPlay.textContent = '▶ Reproduzir'; }
@@ -271,72 +499,123 @@
         video.addEventListener('play', () => { btnPlay.textContent = '⏸ Pausar'; });
         video.addEventListener('pause', () => { btnPlay.textContent = '▶ Reproduzir'; });
 
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        let editingRec = null;
+        let editingEl = null;
+
+        function openNameModal(rec, el) {
+            editingRec = rec;
+            editingEl = el;
+            const input = document.getElementById('recNameInput');
+            input.value = rec.name || (rec.path.split('/').pop() || rec.path);
+            document.getElementById('nameModal').classList.remove('hidden');
+            input.focus();
+        }
+
+        document.getElementById('recNameInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('modalSave').click();
+        });
+
+        document.getElementById('modalCancel').addEventListener('click', () => {
+            document.getElementById('nameModal').classList.add('hidden');
+            editingRec = null;
+            editingEl = null;
+        });
+
+        document.getElementById('modalSave').addEventListener('click', () => {
+            const name = document.getElementById('recNameInput').value.trim();
+            if (!editingRec) return;
+            fetch('/api/recordings/name', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: editingRec.id, name: name || null })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok !== undefined) {
+                    const displayName = name || (editingRec.path.split('/').pop() || editingRec.path);
+                    if (editingEl) {
+                        editingEl.querySelector('.rec-display-name').textContent = displayName;
+                    }
+                }
+            })
+            .catch(err => showError('Erro ao salvar: ' + err.message))
+            .finally(() => {
+                document.getElementById('nameModal').classList.add('hidden');
+                editingRec = null;
+                editingEl = null;
+            });
+        });
+
+        document.getElementById('nameModal').addEventListener('click', (e) => {
+            if (e.target.id === 'nameModal' || e.target.classList.contains('modal-overlay')) {
+                document.getElementById('modalCancel').click();
+            }
+        });
+
         const params = new URLSearchParams(window.location.search);
         const streamParam = params.get('stream');
         if (streamParam) {
             streamNameInput.value = streamParam;
-            try { initHLSPlayer(streamParam); } catch (e) { console.error(e); showError('Erro: ' + e.message); }
+            playerTitle.textContent = streamParam + ' — ao vivo';
+            showView('player');
+            try { initHLSPlayer(streamParam); } catch (e) { showError('Erro: ' + e.message); }
         }
-
-        // Tabs
-        document.querySelectorAll('.tab').forEach(t => {
-            t.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(x => x.classList.add('hidden'));
-                t.classList.add('active');
-                const id = t.dataset.tab === 'live' ? 'tabLive' : 'tabRecordings';
-                document.getElementById(id).classList.remove('hidden');
-                if (t.dataset.tab === 'recordings') loadRecordings();
-            });
-        });
 
         function loadRecordings() {
             const list = document.getElementById('recordingsList');
             const empty = document.getElementById('recordingsEmpty');
             list.innerHTML = '';
-            empty.textContent = 'Carregando...';
+            empty.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg><p>Carregando...</p>';
             empty.classList.remove('hidden');
-            console.log('[LiveBridge] Carregando lista de gravações...');
             fetch('/api/recordings')
-                .then(r => { console.log('[LiveBridge] /api/recordings status', r.status); return r.json().then(data => ({ ok: r.ok, data })); })
+                .then(r => r.json().then(data => ({ ok: r.ok, data })))
                 .then(({ ok, data: recordings }) => {
-                    console.log('[LiveBridge] Gravações recebidas', { ok, count: recordings?.length, recordings });
                     empty.classList.add('hidden');
                     if (!ok && recordings?.error) {
-                        empty.textContent = recordings.error;
+                        empty.innerHTML = '<p>' + recordings.error + '</p>';
                         empty.classList.remove('hidden');
                         return;
                     }
                     if (!recordings?.length) {
-                        empty.textContent = 'Nenhuma gravação encontrada.';
+                        empty.innerHTML = '<p>Nenhuma gravação encontrada.</p>';
                         empty.classList.remove('hidden');
                         return;
                     }
                     recordings.forEach(rec => {
                         const streamLabel = rec.path.split('/').pop() || rec.path;
+                        const displayName = rec.name || streamLabel;
                         const el = document.createElement('div');
                         el.className = 'rec-item';
-                                                const isTimestamp = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(rec.session);
-                        const dbRef = isTimestamp
-                            ? `path: ${rec.path} | session: ${rec.session}`
-                            : `path: ${rec.path}/${rec.session} (sem pasta de data)`;
                         el.innerHTML = `
                             <span class="info">
-                                ${streamLabel} <small>${rec.date}</small>
-                                <br><small class="session-id">${dbRef}</small>
+                                <strong class="rec-display-name">${escapeHtml(displayName)}</strong>
+                                <small>${rec.date}</small>
                             </span>
-                            <button type="button" class="btn btn-play">Assistir</button>
+                            <div class="rec-actions">
+                                <button type="button" class="btn-icon btn-edit" title="Editar nome">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </button>
+                                <button type="button" class="btn btn-primary">Assistir</button>
+                            </div>
                         `;
-                        el.querySelector('.btn').addEventListener('click', () => {
+                        el.querySelector('.btn-primary').addEventListener('click', () => {
                             const url = `/api/recordings/video?path=${encodeURIComponent(rec.path)}&session=${encodeURIComponent(rec.session)}`;
-                            console.log('[LiveBridge] Clicou Assistir gravação', { path: rec.path, session: rec.session, url });
-                            initVodPlayer(streamLabel, url);
+                            playerTitle.textContent = (rec.name || streamLabel) + ' — gravação';
+                            showView('player');
+                            initVodPlayer(rec.name || streamLabel, url);
                         });
+                        el.querySelector('.btn-edit').addEventListener('click', () => openNameModal(rec, el));
                         list.appendChild(el);
                     });
                 })
                 .catch(err => {
-                    empty.textContent = 'Erro ao carregar gravações: ' + err.message;
+                    empty.innerHTML = '<p>Erro ao carregar: ' + err.message + '</p>';
                     empty.classList.remove('hidden');
                 });
         }
@@ -346,11 +625,10 @@
             if (hls) { hls.destroy(); hls = null; }
             statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
-            hlsControls.classList.remove('hidden');
-            document.querySelector('.btn-live')?.classList.add('hidden');
+            btnLive.classList.add('hidden');
             video.src = videoUrl;
             video.onloadedmetadata = () => {
-                statusEl.textContent = 'Gravação pronta';
+                statusEl.textContent = 'Pronto';
                 statusEl.classList.add('live');
                 video.play().catch(() => {});
             };
@@ -360,25 +638,18 @@
             };
             video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
             video.onseeked = updateSeekBar;
-            document.getElementById('playerWrap').classList.remove('hidden');
-            formWrap.classList.add('hidden');
         }
 
         function initHLSPlayer(streamName, hlsUrl, isVod = false) {
-            console.log('[LiveBridge] initHLSPlayer', { streamName, hlsUrl, isVod });
             if (typeof Hls === 'undefined') {
-                console.error('[LiveBridge] Hls não definido');
-                showError('Erro ao carregar o player. Verifique se há bloqueador de anúncios ou firewall.');
+                showError('Erro ao carregar o player. Verifique bloqueador de anúncios.');
                 return;
             }
             isVodMode = isVod;
             const url = hlsUrl || getHLSUrl(streamName);
-            console.log('[LiveBridge] URL:', url);
             statusEl.textContent = 'Conectando...';
             statusEl.classList.remove('live');
-            hlsControls.classList.remove('hidden');
-            var btnLiveEl = document.querySelector('.btn-live');
-            if (btnLiveEl) btnLiveEl.classList.toggle('hidden', isVod);
+            btnLive.classList.toggle('hidden', isVod);
 
             if (Hls.isSupported()) {
                 if (hls) { hls.destroy(); hls = null; }
@@ -389,37 +660,21 @@
                     maxBufferLength: isVod ? 30 : 3,
                     maxMaxBufferLength: isVod ? 60 : 6
                 });
-                hls.on(Hls.Events.MANIFEST_LOADING, () => console.log('[LiveBridge] MANIFEST_LOADING'));
-                hls.on(Hls.Events.MANIFEST_LOADED, (e, d) => console.log('[LiveBridge] MANIFEST_LOADED', d));
-                hls.on(Hls.Events.LEVEL_LOADED, (e, d) => console.log('[LiveBridge] LEVEL_LOADED', d));
-                hls.on(Hls.Events.FRAG_LOADING, (e, d) => console.log('[LiveBridge] FRAG_LOADING', d.frag?.url));
-                hls.on(Hls.Events.FRAG_LOADED, (e, d) => console.log('[LiveBridge] FRAG_LOADED', d.frag?.sn));
-                hls.on(Hls.Events.FRAG_LOAD_ERROR, (e, d) => console.error('[LiveBridge] FRAG_LOAD_ERROR', d));
                 hls.on(Hls.Events.ERROR, (e, d) => {
-                    console.error('[LiveBridge] HLS ERROR', {
-                        fatal: d.fatal,
-                        type: d.type,
-                        details: d.details,
-                        reason: d.reason,
-                        url: d.url,
-                        response: d.response ? { code: d.response.code, url: d.response.url } : null,
-                        event: d
-                    });
                     if (d.fatal) {
                         statusEl.textContent = 'Erro';
                         let msg = d.type === Hls.ErrorTypes.NETWORK_ERROR
-                            ? (isVod ? 'Gravação não encontrada ou segmento com erro.' : 'Stream não encontrado. Inicie a transmissão no OBS primeiro.')
-                            : (d.details || 'Erro') + (d.reason ? ': ' + d.reason : '') + (d.response ? ' (HTTP ' + d.response.code + ')' : '');
+                            ? (isVod ? 'Gravação não encontrada.' : 'Transmissão não encontrada. Inicie no OBS primeiro.')
+                            : (d.details || 'Erro') + (d.reason ? ': ' + d.reason : '');
                         showError(msg);
                     }
                 });
                 hls.loadSource(url);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    console.log('[LiveBridge] MANIFEST_PARSED - stream pronto');
-                    statusEl.textContent = isVod ? 'Gravação pronta' : 'Stream pronto';
+                    statusEl.textContent = isVod ? 'Pronto' : 'Ao vivo';
                     statusEl.classList.add('live');
-                    video.play().catch(e => console.error('[LiveBridge] video.play erro', e));
+                    video.play().catch(() => {});
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = url;
@@ -431,9 +686,6 @@
 
             video.ontimeupdate = () => { updateTime(); updateSeekBar(); };
             video.onseeked = updateSeekBar;
-
-            document.getElementById('playerWrap').classList.remove('hidden');
-            formWrap.classList.add('hidden');
         }
         }); // DOMContentLoaded
     </script>
