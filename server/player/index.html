@@ -565,11 +565,11 @@
             list.innerHTML = '';
             empty.innerHTML = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg><p>Carregando...</p>';
             empty.classList.remove('hidden');
-            fetch('/api/recordings')
+            fetch('/api/recordings', { cache: 'no-store' })
                 .then(r => {
                     const ct = r.headers.get('content-type') || '';
                     if (!ct.includes('application/json')) {
-                        return r.text().then(t => { throw new Error('API retornou HTML em vez de JSON. Verifique se a API está rodando (porta 3000).'); });
+                        return r.text().then(t => { throw new Error('API retornou HTML (status ' + r.status + '). Tente recarregar a página.'); });
                     }
                     return r.json().then(data => ({ ok: r.ok, data }));
                 })
@@ -613,7 +613,13 @@
                     });
                 })
                 .catch(err => {
-                    empty.innerHTML = '<p>Erro ao carregar: ' + err.message + '</p>';
+                    empty.innerHTML = '<p>Erro ao carregar: ' + escapeHtml(err.message) + '</p>';
+                    const retryBtn = document.createElement('button');
+                    retryBtn.textContent = 'Tentar novamente';
+                    retryBtn.className = 'btn btn-primary';
+                    retryBtn.style.marginTop = '0.5rem';
+                    retryBtn.onclick = () => loadRecordings();
+                    empty.appendChild(retryBtn);
                     empty.classList.remove('hidden');
                 });
         }
