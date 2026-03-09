@@ -1,5 +1,3 @@
-# LiveBridge - MediaMTX config otimizado para menor latência
-
 logLevel: warn
 
 # Desabilitar protocolos não usados

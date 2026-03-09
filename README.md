@@ -58,7 +58,7 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 
 **Se usar 1080p:** bitrate vídeo 6000–8000 kbps.
 
-O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e arquivos menores.
+O merge grava com CRF 21 + AAC 96k (preset slower) — ideal para imagens reais de câmera, garantindo rosto/lousa legíveis com um tamanho de arquivo muito reduzido.
 
 ## Gravação no R2 (Cloudflare)
 
@@ -69,7 +69,7 @@ O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e 
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 
-**Compressão (otimizada para aula):** H.264 CRF 18 (vídeo), AAC 96k (áudio), preset slow, tune animation. Alta qualidade, menor tamanho. Desativar: `COMPRESS_VIDEO=0` no `.env`.
+**Compressão (otimizada para sala de aula):** H.264 CRF 21 (vídeo real), AAC 96k (áudio), preset slower. Qualidade de rosto/lousa com o menor tamanho. Desativar: `COMPRESS_VIDEO=0` no `.env`.
 
 ### Gravações não carregam no player?
 
