@@ -72,7 +72,7 @@ O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e 
 
 **Nomes customizados:** Os títulos das aulas são salvos em `server/api/data/recordings-names.json` (volume montado no Docker).
 
-**Compressão (otimizada para aula):** H.264 CRF 18 (vídeo), AAC 96k (áudio), preset slow, tune animation. Alta qualidade, menor tamanho. Desativar: `COMPRESS_VIDEO=0` no `.env`.
+**Compressão:** H.264 CRF 18 (vídeo), AAC 96k (áudio). Preset padrão `veryfast` (rápido em VPS). Para melhor qualidade (mais lento): `COMPRESS_PRESET=slow` no `.env`. Para só concatenar sem recompressão (mais rápido): `COMPRESS_VIDEO=0`.
 
 ### Gravações não carregam no player?
 
