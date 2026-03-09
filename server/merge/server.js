@@ -17,8 +17,8 @@ const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const R2_VIDEOS_PREFIX = 'recordings/videos/';
 const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
-// preset: veryfast (rápido em VPS), fast, medium, slow (melhor qualidade, mais lento)
-const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'veryfast';
+// preset: fast (bom equilíbrio), faster, veryfast (mais rápido), medium, slow (melhor compressão, mais lento)
+const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'fast';
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({

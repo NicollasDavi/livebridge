@@ -17,7 +17,7 @@ services:
     environment:
       RECORDINGS_DIR: /recordings
       COMPRESS_VIDEO: ${COMPRESS_VIDEO:-1}
-      COMPRESS_PRESET: ${COMPRESS_PRESET:-veryfast}
+      COMPRESS_PRESET: ${COMPRESS_PRESET:-fast}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
       R2_SECRET_KEY: ${R2_SECRET_KEY:-}
