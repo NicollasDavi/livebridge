@@ -17,8 +17,10 @@ const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const R2_VIDEOS_PREFIX = 'recordings/videos/';
 const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
-// preset: fast (bom equilíbrio), faster, veryfast (mais rápido), medium, slow (melhor compressão, mais lento)
+// preset: veryfast (mais rápido), fast (balanceado), medium, slow (melhor qualidade)
 const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'fast';
+// CRF: 18-23 (menor = melhor qualidade, maior arquivo). 20 é bom para aulas
+const COMPRESS_CRF = parseInt(process.env.COMPRESS_CRF || '20', 10) || 20;
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({
@@ -76,7 +78,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
   writeFileSync(listPath, listContent);
   const outPath = join(sessionDir, `${sessionName}.mp4`);
   const ffmpegCmd = COMPRESS_VIDEO
-    ? `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf 18 -preset ${COMPRESS_PRESET} -tune animation -c:a aac -b:a 96k -aac_coder twoloop -movflags +faststart "${outPath}"`
+    ? `ffmpeg -y -threads 0 -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf ${COMPRESS_CRF} -preset ${COMPRESS_PRESET} -tune animation -c:a aac -b:a 96k -aac_coder twoloop -movflags +faststart "${outPath}"`
     : `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`;
   try {
     execSync(ffmpegCmd, {
@@ -293,7 +295,7 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Merge service rodando na porta ${PORT}`);
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
-  console.log(`[merge] Compressão: ${COMPRESS_VIDEO ? 'H.264 CRF 18 + AAC 96k, preset ' + COMPRESS_PRESET : 'copy (rápido, tamanho original)'}`);
+  console.log(`[merge] Compressão: ${COMPRESS_VIDEO ? 'H.264 CRF ' + COMPRESS_CRF + ' + AAC 96k, preset ' + COMPRESS_PRESET : 'copy (rápido, tamanho original)'}`);
   if (hasR2) {
     s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, MaxKeys: 1 }))
       .then(() => console.log(`[merge] R2 bucket "${R2_BUCKET}" acessível`))
