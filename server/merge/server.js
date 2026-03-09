@@ -24,7 +24,7 @@ const s3 = hasR2 ? new S3Client({
 }) : null;
 
 function mergeAndUpload(path, sessionNameOrDir = null) {
-  let sessionDir, sessionName;
+  let sessionDir, sessionName, deleteFolderAfter = true;
   if (sessionNameOrDir) {
     if (typeof sessionNameOrDir === 'string' && sessionNameOrDir.includes('/')) {
       sessionDir = sessionNameOrDir;
@@ -39,14 +39,22 @@ function mergeAndUpload(path, sessionNameOrDir = null) {
   } else {
     const fullPath = join(RECORDINGS_DIR, path);
     if (!existsSync(fullPath)) return Promise.resolve({ ok: false, reason: 'no_session' });
-    const entries = readdirSync(fullPath, { withFileTypes: true });
-    const dirs = entries
-      .filter(e => e.isDirectory())
-      .map(e => ({ name: e.name, path: join(fullPath, e.name), mtime: statSync(join(fullPath, e.name)).mtime }))
-      .sort((a, b) => b.mtime - a.mtime);
-    if (!dirs[0]) return Promise.resolve({ ok: false, reason: 'no_session' });
-    sessionDir = dirs[0].path;
-    sessionName = dirs[0].name;
+    const tsInStream = readdirSync(fullPath).filter(f => f.endsWith('.ts'));
+    if (tsInStream.length > 0) {
+      sessionDir = fullPath;
+      deleteFolderAfter = false;
+      const sorted = tsInStream.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      sessionName = sorted[0].replace(/\.ts$/i, '').replace(/-\d+$/, '');
+    } else {
+      const entries = readdirSync(fullPath, { withFileTypes: true });
+      const dirs = entries
+        .filter(e => e.isDirectory())
+        .map(e => ({ name: e.name, path: join(fullPath, e.name), mtime: statSync(join(fullPath, e.name)).mtime }))
+        .sort((a, b) => b.mtime - a.mtime);
+      if (!dirs[0]) return Promise.resolve({ ok: false, reason: 'no_session' });
+      sessionDir = dirs[0].path;
+      sessionName = dirs[0].name;
+    }
   }
   const tsFiles = readdirSync(sessionDir)
     .filter(f => f.endsWith('.ts'))
@@ -91,7 +99,9 @@ function mergeAndUpload(path, sessionNameOrDir = null) {
       try { unlinkSync(join(sessionDir, f)); } catch (_) {}
     }
     try { unlinkSync(outPath); } catch (_) {}
-    try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
+    if (deleteFolderAfter) {
+      try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
+    }
     console.log('[merge] Upload concluído:', r2Key);
     return { ok: true, key: r2Key };
   }).catch(e => {
@@ -139,10 +149,23 @@ function scanRecordings() {
     const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
     for (const s of streams) {
       const streamPath = join(pathBase, s.name);
+      const tsInStream = readdirSync(streamPath).filter(f => f.endsWith('.ts'));
+      if (tsInStream.length > 0) {
+        const newestTs = tsInStream.map(f => ({ f, m: statSync(join(streamPath, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0];
+        const ageSec = Math.round((Date.now() - newestTs.m) / 1000);
+        result.sessions.push({
+          path: `live/${s.name}`,
+          session: '(flat)',
+          tsCount: tsInStream.length,
+          ageSeconds: ageSec,
+          stale: ageSec >= 120
+        });
+      }
       const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
       for (const sess of sessions) {
         const sessionPath = join(streamPath, sess.name);
         const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
+        if (tsFiles.length === 0) continue;
         const stat = statSync(sessionPath);
         const ageSec = Math.round((Date.now() - stat.mtimeMs) / 1000);
         result.sessions.push({
@@ -166,15 +189,47 @@ const STALE_MS = 2 * 60 * 1000;
 const processedDirs = new Set();
 
 let lastLogTime = 0;
+let scanCount = 0;
 function findStaleSessions() {
   try {
+    scanCount++;
     const pathBase = join(RECORDINGS_DIR, 'live');
-    if (!existsSync(pathBase)) return;
+    if (!existsSync(pathBase)) {
+      if (scanCount % 20 === 1) console.log('[merge] Scan:', pathBase, 'não existe');
+      return;
+    }
     const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
-    if (streams.length === 0) return;
+    if (streams.length === 0) {
+      if (scanCount % 20 === 1) console.log('[merge] Scan:', pathBase, 'vazio (MediaMTX não gravou?)');
+      return;
+    }
     let totalSessions = 0;
     for (const s of streams) {
       const streamPath = join(pathBase, s.name);
+      const mtxPath = `live/${s.name}`;
+
+      const tsInStream = readdirSync(streamPath).filter(f => f.endsWith('.ts'));
+      if (tsInStream.length > 0) {
+        totalSessions++;
+        const newestMs = Math.max(...tsInStream.map(f => statSync(join(streamPath, f)).mtimeMs));
+        const age = Date.now() - newestMs;
+        if (age >= STALE_MS) {
+          const key = streamPath + ':flat';
+          if (!processedDirs.has(key)) {
+            processedDirs.add(key);
+            console.log('[merge] Stream finalizado (flat):', mtxPath, tsInStream.length, 'segmentos');
+            mergeAndUpload(mtxPath).then(r => {
+              processedDirs.delete(key);
+              if (r.ok) console.log('[merge] Upload OK:', r.key);
+              else console.warn('[merge] Falhou:', r.reason);
+            }).catch(e => {
+              processedDirs.delete(key);
+              console.error('[merge] Erro:', e.message);
+            });
+          }
+        }
+      }
+
       const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
       for (const sess of sessions) {
         const sessionPath = join(streamPath, sess.name);
@@ -186,17 +241,12 @@ function findStaleSessions() {
         const stat = statSync(sessionPath);
         const age = Date.now() - stat.mtimeMs;
         if (age < STALE_MS) continue;
-        const mtxPath = `live/${s.name}`;
         processedDirs.add(key);
         console.log('[merge] Sessão finalizada detectada:', mtxPath, sess.name);
         mergeAndUpload(mtxPath, sess.name).then(r => {
-          if (r.ok) {
-            processedDirs.delete(key);
-            console.log('[merge] Upload OK:', r.key);
-          } else {
-            processedDirs.delete(key);  // permite retentar na próxima varredura
-            console.warn('[merge] Falhou:', r.reason);
-          }
+          processedDirs.delete(key);
+          if (r.ok) console.log('[merge] Upload OK:', r.key);
+          else console.warn('[merge] Falhou:', r.reason);
         }).catch(e => {
           processedDirs.delete(key);
           console.error('[merge] Erro:', e.message);
