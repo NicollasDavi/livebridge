@@ -60,6 +60,8 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 
+**Compressão:** por padrão o merge re-encoda com H.264 CRF 21 (boa qualidade, ~40–50% menor). Para desativar: `COMPRESS_VIDEO=0` no `.env`.
+
 ### Gravações não carregam no player?
 
 **Padrão:** a API faz proxy dos segmentos (sem CORS).

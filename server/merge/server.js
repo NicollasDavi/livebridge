@@ -15,6 +15,7 @@ const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY?.trim();
 const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const R2_VIDEOS_PREFIX = 'recordings/videos/';
+const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({
@@ -71,10 +72,13 @@ function mergeAndUpload(path, sessionNameOrDir = null) {
   const listContent = tsFiles.map(f => `file '${join(sessionDir, f)}'`).join('\n');
   writeFileSync(listPath, listContent);
   const outPath = join(sessionDir, `${sessionName}.mp4`);
+  const ffmpegCmd = COMPRESS_VIDEO
+    ? `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf 21 -preset medium -c:a aac -b:a 128k -movflags +faststart "${outPath}"`
+    : `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`;
   try {
-    execSync(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`, {
+    execSync(ffmpegCmd, {
       stdio: 'inherit',
-      timeout: 300000
+      timeout: 3600000
     });
   } catch (e) {
     console.error('[merge] ffmpeg falhou', e);
@@ -269,6 +273,7 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Merge service rodando na porta ${PORT}`);
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
+  console.log(`[merge] Compressão: ${COMPRESS_VIDEO ? 'H.264 CRF 21 (boa qualidade, menor tamanho)' : 'copy (rápido, tamanho original)'}`);
   if (hasR2) {
     s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, MaxKeys: 1 }))
       .then(() => console.log(`[merge] R2 bucket "${R2_BUCKET}" acessível`))
