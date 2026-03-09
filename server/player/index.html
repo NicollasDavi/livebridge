@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveBridge — Plataforma de Aulas ao Vivo</title>
+    <title>Posiplay — Plataforma de Aulas ao Vivo</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,9 +14,9 @@
             --surface: #ffffff;
             --sidebar: #1e293b;
             --sidebar-hover: #334155;
-            --accent: #0ea5e9;
-            --accent-hover: #0284c7;
-            --accent-dim: rgba(14, 165, 233, 0.12);
+            --accent: #f97316;
+            --accent-hover: #ea580c;
+            --accent-dim: rgba(249, 115, 22, 0.12);
             --text: #0f172a;
             --text-muted: #64748b;
             --border: #e2e8f0;
@@ -41,27 +41,19 @@
             flex-direction: column;
         }
         .sidebar-logo {
-            padding: 0 1.5rem 1.5rem;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            margin-bottom: 1rem;
-        }
-        .sidebar-logo h1 {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .sidebar-logo .icon {
-            width: 28px;
-            height: 28px;
-            background: linear-gradient(135deg, var(--accent), #06b6d4);
+            padding: 1rem 1.5rem;
+            margin: 0 1rem 1rem;
+            background: var(--accent);
             border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1rem;
+        }
+        .sidebar-logo img {
+            height: 36px;
+            width: auto;
+            max-width: 100%;
+            object-fit: contain;
         }
         .nav-item {
             display: flex;
@@ -297,7 +289,7 @@
 <body>
     <aside class="sidebar">
         <div class="sidebar-logo">
-            <h1><span class="icon">📚</span> LiveBridge</h1>
+            <img src="https://www.posiplay.com.br/imagemsite/399/Site-Posiplay-512-x-147-px-2-1-.png" alt="Posiplay">
         </div>
         <nav>
             <button type="button" class="nav-item active" data-nav="dashboard">
