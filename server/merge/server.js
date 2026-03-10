@@ -156,6 +156,54 @@ app.post('/merge', async (req, res) => {
   }
 });
 
+/** Envia um MP4 existente para o R2 (sem re-encodar). Útil quando ffmpeg concluiu mas o upload falhou. */
+app.post('/merge/upload', async (req, res) => {
+  const path = req.query.path || req.body?.path;
+  const session = req.query.session || req.body?.session;
+  if (!path || !session) {
+    return res.status(400).json({ error: 'path e session obrigatórios (ex: path=live/teste&session=2026-03-10_10-10-39)' });
+  }
+  if (!hasR2) {
+    return res.status(503).json({ error: 'R2 não configurado' });
+  }
+  const outPath = join(RECORDINGS_DIR, path, `${session}.mp4`);
+  if (!existsSync(outPath)) {
+    return res.status(404).json({ error: `Arquivo não encontrado: ${outPath}` });
+  }
+  const r2Key = `${R2_VIDEOS_PREFIX}${path}/${session}.mp4`;
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 1) console.log(`[merge/upload] Tentativa ${attempt}/${MAX_RETRIES}...`);
+      const upload = new Upload({
+        client: s3,
+        params: {
+          Bucket: R2_BUCKET,
+          Key: r2Key,
+          Body: createReadStream(outPath),
+          ContentType: 'video/mp4'
+        },
+        queueSize: 4,
+        partSize: 100 * 1024 * 1024,
+        leavePartsOnError: false
+      });
+      await upload.done();
+      try {
+        const head = await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: r2Key }));
+        console.log('[merge/upload] Upload concluído:', r2Key, `(${Math.round((head.ContentLength || 0) / 1024 / 1024)}MB)`);
+      } catch (_) {}
+      return res.json({ ok: true, key: r2Key });
+    } catch (e) {
+      console.error('[merge/upload] Falhou:', e?.message || e);
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, attempt * 5000));
+      } else {
+        return res.status(500).json({ ok: false, error: e?.message || 'upload_failed' });
+      }
+    }
+  }
+});
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Debug: lista sessões locais e status R2
