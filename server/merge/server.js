@@ -21,7 +21,7 @@ const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
 const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'fast';
 // CRF: 18-23 (menor = melhor qualidade, maior arquivo). 20 é bom para aulas
 const COMPRESS_CRF = parseInt(process.env.COMPRESS_CRF || '20', 10) || 20;
-const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '21600000', 10) || 21600000; // 6h default
+const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 10) || 43200000; // 12h default (vídeos longos)
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({
