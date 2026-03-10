@@ -19,6 +19,7 @@ services:
       COMPRESS_VIDEO: ${COMPRESS_VIDEO:-1}
       COMPRESS_PRESET: ${COMPRESS_PRESET:-fast}
       COMPRESS_CRF: ${COMPRESS_CRF:-20}
+      FFMPEG_TIMEOUT_MS: ${FFMPEG_TIMEOUT_MS:-21600000}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
       R2_SECRET_KEY: ${R2_SECRET_KEY:-}
@@ -26,7 +27,7 @@ services:
     volumes:
       - ./recordings:/recordings
     ports:
-      - "8080:8080"
+      - "8082:8080"
 
   api:
     build: ./api
@@ -38,8 +39,9 @@ services:
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
       R2_SECRET_KEY: ${R2_SECRET_KEY:-}
       R2_BUCKET: ${R2_BUCKET:-livebridge}
-    volumes:
-      - ./api/data:/app/data
+      LESSONS_API_URL: ${LESSONS_API_URL:-http://host.docker.internal:8080}
+      LESSONS_API_TOKEN: ${LESSONS_API_TOKEN:-}
+      SKIP_LESSONS_API: ${SKIP_LESSONS_API:-0}
     ports:
       - "3000:3000"
 

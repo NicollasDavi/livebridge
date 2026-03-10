@@ -28,7 +28,7 @@ docker compose up -d
 |--------|------------------|
 | 1935   | RTMP (OBS)       |
 | 3000   | API (gravações)  |
-| 8080   | Merge (concatena vídeos) |
+| 8082   | Merge (concatena vídeos) |
 | 8081   | Player web       |
 | 8888   | HLS              |
 

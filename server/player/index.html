@@ -277,6 +277,20 @@
         }
         .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
         .modal .btns { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+        .modal-wide { max-width: 520px; width: 100%; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
+        .form-group-full { grid-column: 1 / -1; }
+        .form-group label { font-size: 0.85rem; font-weight: 500; color: var(--text); }
+        .form-group input, .form-group select {
+            padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+            background: var(--bg); color: var(--text); font-size: 0.9rem;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim);
+        }
+        .checkboxes-wrap { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; max-height: 100px; overflow-y: auto; }
+        .checkboxes-wrap label { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; cursor: pointer; }
         .section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
         .empty-state {
             text-align: center;
@@ -366,11 +380,45 @@
             </div>
         </div>
     </main>
-    <div class="modal-overlay hidden" id="nameModal">
-        <div class="modal">
-            <h3>Nome da aula</h3>
-            <label for="recNameInput">Título exibido na biblioteca</label>
-            <input type="text" id="recNameInput" placeholder="Ex: Matemática - Aula 1" style="width:100%;padding:0.75rem;margin-top:0.5rem;border:1px solid var(--border);border-radius:8px;">
+    <div class="modal-overlay hidden" id="metadataModal">
+        <div class="modal modal-wide">
+            <h3>Editar aula</h3>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="recNumero">Número</label>
+                    <input type="text" id="recNumero" placeholder="Ex: 1">
+                </div>
+                <div class="form-group">
+                    <label for="recNome">Nome</label>
+                    <input type="text" id="recNome" placeholder="Ex: Matemática - Aula 1">
+                </div>
+                <div class="form-group">
+                    <label for="recAssunto">Assunto</label>
+                    <input type="text" id="recAssunto" placeholder="Ex: Funções">
+                </div>
+                <div class="form-group">
+                    <label for="recProfessor">Professor</label>
+                    <select id="recProfessor">
+                        <option value="">— Selecione —</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="recMateria">Matéria</label>
+                    <select id="recMateria">
+                        <option value="">— Selecione —</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="recFrente">Frente</label>
+                    <select id="recFrente">
+                        <option value="">— Selecione —</option>
+                    </select>
+                </div>
+                <div class="form-group form-group-full">
+                    <label>Cursos</label>
+                    <div id="recCursosCheckboxes" class="checkboxes-wrap"></div>
+                </div>
+            </div>
             <div class="btns">
                 <button type="button" class="btn btn-back" id="modalCancel">Cancelar</button>
                 <button type="button" class="btn btn-primary" id="modalSave">Salvar</button>
@@ -414,16 +462,14 @@
             });
             const titles = { dashboard: 'Dashboard', live: 'Aulas ao vivo', recordings: 'Biblioteca de gravações', player: 'Assistindo' };
             document.getElementById('headerTitle').textContent = titles[id] || 'LiveBridge';
+            if (id === 'recordings') loadRecordings();
         }
 
         document.querySelectorAll('[data-goto]').forEach(btn => {
             btn.addEventListener('click', () => showView(btn.dataset.goto));
         });
         document.querySelectorAll('.nav-item').forEach(n => {
-            n.addEventListener('click', () => {
-                showView(n.dataset.nav);
-                if (n.dataset.nav === 'recordings') loadRecordings();
-            });
+            n.addEventListener('click', () => showView(n.dataset.nav));
         });
 
         btnHLS.addEventListener('click', () => {
@@ -499,53 +545,102 @@
 
         let editingRec = null;
         let editingEl = null;
+        let refsCache = { professores: [], materias: [], frentes: [], cursos: [] };
 
-        function openNameModal(rec, el) {
-            editingRec = rec;
-            editingEl = el;
-            const input = document.getElementById('recNameInput');
-            input.value = rec.name || (rec.path.split('/').pop() || rec.path);
-            document.getElementById('nameModal').classList.remove('hidden');
-            input.focus();
+        const defaultFrentes = ['A', 'B', 'C', 'D', 'E'];
+        const defaultMaterias = ['Matemática', 'Português', 'Física', 'Química', 'Biologia', 'História', 'Geografia', 'Literatura', 'Inglês', 'Redação', 'Filosofia', 'Sociologia'];
+        const defaultProfessores = ['Professor 1', 'Professor 2', 'Professor 3', 'Professor 4', 'Professor 5'];
+
+        function mergeRefs(apiList, defaults) {
+            const fromApi = (apiList || []).map(x => (typeof x === 'string' ? { nome: x } : x));
+            const seen = new Set(fromApi.map(x => (x.nome || '').trim()).filter(Boolean));
+            for (const d of defaults) {
+                if (d && !seen.has(d)) { fromApi.push({ nome: d }); seen.add(d); }
+            }
+            return fromApi.sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
         }
 
-        document.getElementById('recNameInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') document.getElementById('modalSave').click();
-        });
+        async function loadRefs() {
+            const [prof, mat, front, curs] = await Promise.all([
+                fetch('/api/professores').then(r => r.json()).catch(() => []),
+                fetch('/api/materias').then(r => r.json()).catch(() => []),
+                fetch('/api/frentes').then(r => r.json()).catch(() => []),
+                fetch('/api/cursos').then(r => r.json()).catch(() => [])
+            ]);
+            refsCache = {
+                professores: mergeRefs(prof, defaultProfessores),
+                materias: mergeRefs(mat, defaultMaterias),
+                frentes: mergeRefs(front, defaultFrentes),
+                cursos: mergeRefs(curs, [])
+            };
+        }
+
+        function openMetadataModal(rec, el) {
+            editingRec = rec;
+            editingEl = el;
+            document.getElementById('recNumero').value = rec.numero ?? '';
+            document.getElementById('recNome').value = rec.name || (rec.path.split('/').pop() || rec.path);
+            document.getElementById('recAssunto').value = rec.assunto ?? '';
+            loadRefs().then(() => {
+                const esc = v => (v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const sel = (id, list, current) => {
+                    const s = document.getElementById(id);
+                    s.innerHTML = '<option value="">— Selecione —</option>' + (list || []).map(r => 
+                        `<option value="${esc(r.nome)}" ${r.nome === current ? 'selected' : ''}>${escapeHtml(r.nome)}</option>`
+                    ).join('');
+                };
+                sel('recProfessor', refsCache.professores, rec.professor);
+                sel('recMateria', refsCache.materias, rec.materia);
+                sel('recFrente', refsCache.frentes, rec.frente);
+                const wrap = document.getElementById('recCursosCheckboxes');
+                const selected = rec.cursos || [];
+                wrap.innerHTML = (refsCache.cursos || []).map(c => {
+                    const checked = selected.includes(c.nome) ? 'checked' : '';
+                    return `<label><input type="checkbox" value="${esc(c.nome)}" ${checked}> ${escapeHtml(c.nome)}</label>`;
+                }).join('');
+            });
+            document.getElementById('metadataModal').classList.remove('hidden');
+            document.getElementById('recNome').focus();
+        }
 
         document.getElementById('modalCancel').addEventListener('click', () => {
-            document.getElementById('nameModal').classList.add('hidden');
+            document.getElementById('metadataModal').classList.add('hidden');
             editingRec = null;
             editingEl = null;
         });
 
         document.getElementById('modalSave').addEventListener('click', () => {
-            const name = document.getElementById('recNameInput').value.trim();
             if (!editingRec) return;
-            fetch('/api/recordings/name', {
+            const rawNumero = document.getElementById('recNumero').value.trim();
+            const numero = rawNumero ? parseInt(rawNumero, 10) : 0;
+            const nome = document.getElementById('recNome').value.trim() || null;
+            const assunto = document.getElementById('recAssunto').value.trim() || null;
+            const professor = document.getElementById('recProfessor').value.trim() || null;
+            const materia = document.getElementById('recMateria').value.trim() || null;
+            const frente = document.getElementById('recFrente').value.trim() || null;
+            const cursos = Array.from(document.querySelectorAll('#recCursosCheckboxes input:checked')).map(cb => cb.value);
+            fetch('/api/recordings/metadata', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: editingRec.id, name: name || null })
+                body: JSON.stringify({ id: editingRec.id, numero: isNaN(numero) ? 0 : numero, nome, assunto, professor, materia, frente, cursos })
             })
             .then(r => r.json())
             .then(data => {
-                if (data.ok !== undefined) {
-                    const displayName = name || (editingRec.path.split('/').pop() || editingRec.path);
-                    if (editingEl) {
-                        editingEl.querySelector('.rec-display-name').textContent = displayName;
-                    }
+                if (data.ok) {
+                    const displayName = nome || (editingRec.path.split('/').pop() || editingRec.path);
+                    if (editingEl) editingEl.querySelector('.rec-display-name').textContent = displayName;
                 }
             })
             .catch(err => showError('Erro ao salvar: ' + err.message))
             .finally(() => {
-                document.getElementById('nameModal').classList.add('hidden');
+                document.getElementById('metadataModal').classList.add('hidden');
                 editingRec = null;
                 editingEl = null;
             });
         });
 
-        document.getElementById('nameModal').addEventListener('click', (e) => {
-            if (e.target.id === 'nameModal' || e.target.classList.contains('modal-overlay')) {
+        document.getElementById('metadataModal').addEventListener('click', (e) => {
+            if (e.target.id === 'metadataModal' || e.target.classList.contains('modal-overlay')) {
                 document.getElementById('modalCancel').click();
             }
         });
@@ -608,7 +703,7 @@
                             showView('player');
                             initVodPlayer(rec.name || streamLabel, url);
                         });
-                        el.querySelector('.btn-edit').addEventListener('click', () => openNameModal(rec, el));
+                        el.querySelector('.btn-edit').addEventListener('click', () => openMetadataModal(rec, el));
                         list.appendChild(el);
                     });
                 })

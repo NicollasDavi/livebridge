@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { readdirSync, statSync, writeFileSync, unlinkSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createReadStream } from 'fs';
-import { ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 
@@ -21,6 +21,7 @@ const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
 const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'fast';
 // CRF: 18-23 (menor = melhor qualidade, maior arquivo). 20 é bom para aulas
 const COMPRESS_CRF = parseInt(process.env.COMPRESS_CRF || '20', 10) || 20;
+const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '21600000', 10) || 21600000; // 6h default
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
 const s3 = hasR2 ? new S3Client({
@@ -83,7 +84,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
   try {
     execSync(ffmpegCmd, {
       stdio: 'inherit',
-      timeout: 3600000
+      timeout: FFMPEG_TIMEOUT_MS
     });
   } catch (e) {
     console.error('[merge] ffmpeg falhou', e);
@@ -114,7 +115,12 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
         leavePartsOnError: false
       });
       await upload.done();
-      console.log('[merge] Upload concluído:', r2Key);
+      try {
+        const head = await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: r2Key }));
+        console.log('[merge] Upload concluído:', R2_BUCKET, r2Key, `(${Math.round((head.ContentLength || 0) / 1024 / 1024)}MB)`);
+      } catch (verifyErr) {
+        console.warn('[merge] Upload OK mas verificação falhou:', verifyErr?.message);
+      }
       for (const f of tsFiles) {
         try { unlinkSync(join(sessionDir, f)); } catch (_) {}
       }
