@@ -6,6 +6,7 @@ services:
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
       - ./recordings:/recordings
+      - mediamtx-hls:/hls
     ports:
       - "1935:1935"   # RTMP (OBS)
       - "8888:8888"   # HLS
@@ -57,3 +58,6 @@ services:
       - ./player/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "8081:80"
+
+volumes:
+  mediamtx-hls:

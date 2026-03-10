@@ -17,9 +17,11 @@ hlsAddress: :8888
 hlsAllowOrigins: ['*']
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 3
+# DVR estilo YouTube: permite voltar ao início da live (8h = 28800 segmentos de 1s)
+hlsSegmentCount: 28800
 hlsSegmentDuration: 1s
 hlsSegmentMaxSize: 50M
+hlsDirectory: /hls
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
 paths:
