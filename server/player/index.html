@@ -365,7 +365,7 @@
                         <button type="button" class="btn btn-back" id="btnBack">← Voltar</button>
                     </div>
                     <div class="video-container">
-                        <video id="video" playsinline controls></video>
+                        <video id="video" playsinline controls controlsList="nodownload noremoteplayback" disablePictureInPicture disableRemotePlayback></video>
                     </div>
                     <div class="controls" id="hlsControls">
                         <button type="button" class="btn btn-play" id="btnPlay">▶ Pausar</button>
@@ -414,6 +414,13 @@
                         <option value="">— Selecione —</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label for="recAtivo">Ativo</label>
+                    <select id="recAtivo">
+                        <option value="true">Sim</option>
+                        <option value="false">Não</option>
+                    </select>
+                </div>
                 <div class="form-group form-group-full">
                     <label>Cursos</label>
                     <div id="recCursosCheckboxes" class="checkboxes-wrap"></div>
@@ -429,7 +436,9 @@
         window.addEventListener('error', function(e) { console.error('[LiveBridge]', e.message); });
         window.addEventListener('unhandledrejection', function(e) { console.error('[LiveBridge]', e.reason); });
         document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/init', { credentials: 'include' }).catch(() => {});
         const video = document.getElementById('video');
+        video.addEventListener('contextmenu', e => e.preventDefault());
         const btnPlay = document.getElementById('btnPlay');
         const btnLive = document.getElementById('btnLive');
         const seek = document.getElementById('seek');
@@ -586,6 +595,7 @@
             document.getElementById('recNumero').value = rec.numero ?? '';
             document.getElementById('recNome').value = rec.name || (rec.path.split('/').pop() || rec.path);
             document.getElementById('recAssunto').value = rec.assunto ?? '';
+            document.getElementById('recAtivo').value = rec.ativo === false ? 'false' : 'true';
             loadRefs().then(() => {
                 const esc = v => (v||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
                 const sel = (id, list, current) => {
@@ -623,11 +633,12 @@
             const professor = document.getElementById('recProfessor').value.trim() || null;
             const materia = document.getElementById('recMateria').value.trim() || null;
             const frente = document.getElementById('recFrente').value.trim() || null;
+            const ativo = document.getElementById('recAtivo').value === 'true';
             const cursos = Array.from(document.querySelectorAll('#recCursosCheckboxes input:checked')).map(cb => cb.value);
             fetch('/api/recordings/metadata', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: editingRec.id, numero: isNaN(numero) ? 0 : numero, nome, assunto, professor, materia, frente, cursos })
+                body: JSON.stringify({ id: editingRec.id, numero: isNaN(numero) ? 0 : numero, nome, assunto, professor, materia, frente, cursos, ativo })
             })
             .then(r => r.json())
             .then(data => {

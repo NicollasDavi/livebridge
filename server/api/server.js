@@ -1,12 +1,72 @@
 import express from 'express';
-import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import { ListObjectsV2Command, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 import cors from 'cors';
 
 const app = express();
-app.use(cors());
+const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4200,http://localhost:8081').split(',').map(s => s.trim());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (origin && corsOrigins.includes(origin)) {
+      callback(null, origin);
+    } else if (!origin) {
+      callback(null, corsOrigins[0]);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(cookieParser());
 app.use(express.json());
+
+const VIDEO_ACCESS_SECRET = process.env.VIDEO_ACCESS_SECRET;
+const VIDEO_LIVE_COOKIE = 'vid_live';
+const VIDEO_LIVE_MAX_AGE = 14400; // 4h para live
+
+/** Valida JWT de gravação (path, session). Retorna payload ou null. */
+function verifyVideoToken(token) {
+  if (!VIDEO_ACCESS_SECRET || !token) return null;
+  try {
+    const payload = jwt.verify(token, VIDEO_ACCESS_SECRET, { algorithms: ['HS256'] });
+    if (!payload.path || !payload.session) return null;
+    return payload;
+  } catch (e) {
+    console.log('[video] JWT verify error:', e.message);
+    return null;
+  }
+}
+
+/** Valida JWT de live (streamName). Retorna payload ou null. */
+function verifyLiveToken(token) {
+  if (!VIDEO_ACCESS_SECRET || !token) return null;
+  try {
+    const payload = jwt.verify(token, VIDEO_ACCESS_SECRET, { algorithms: ['HS256'] });
+    if (!payload.streamName) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/** Cookie legado para /api/recordings (listagem) — mantido para compatibilidade */
+const VIDEO_ACCESS_COOKIE = 'vid_ctx';
+const VIDEO_ACCESS_MAX_AGE = 86400;
+
+function setVideoAccessCookie(res) {
+  const token = crypto.randomBytes(24).toString('hex');
+  res.cookie(VIDEO_ACCESS_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: VIDEO_ACCESS_MAX_AGE
+  });
+}
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY;
@@ -75,6 +135,42 @@ async function fetchDistinct(field) {
   }
 }
 
+/** Inicializa sessão de vídeo (cookie para listagem — gravações e live usam JWT) */
+app.get('/api/init', (req, res) => {
+  setVideoAccessCookie(res);
+  res.json({ ok: true });
+});
+
+/** Valida acesso a HLS (usado pelo nginx auth_request). Query: stream=nome_do_stream */
+app.get('/api/check-video-access', (req, res) => {
+  const stream = req.query.stream;
+  if (VIDEO_ACCESS_SECRET) {
+    if (!stream || typeof stream !== 'string') return res.status(403).end();
+    const token = req.cookies?.[VIDEO_LIVE_COOKIE];
+    const payload = verifyLiveToken(token);
+    if (!payload || payload.streamName !== stream) return res.status(403).end();
+  } else {
+    const cookie = req.cookies?.[VIDEO_ACCESS_COOKIE];
+    if (!cookie || cookie.length < 32) return res.status(403).end();
+  }
+  res.status(200).end();
+});
+
+/** Inicializa sessão de live — token JWT obtido do Java (check-live-access) */
+app.post('/api/init-live', express.json(), (req, res) => {
+  const { streamName, token } = req.body;
+  if (!streamName || !token) return res.status(400).json({ error: 'streamName e token obrigatórios' });
+  const payload = verifyLiveToken(token);
+  if (!payload || payload.streamName !== streamName) return res.status(403).json({ error: 'Token inválido ou expirado' });
+  res.cookie(VIDEO_LIVE_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: VIDEO_LIVE_MAX_AGE
+  });
+  res.json({ ok: true });
+});
+
 /** Lista gravações (.mp4 em recordings/videos/) com metadata da API Lessons */
 app.get('/api/recordings', requireR2, async (req, res) => {
   try {
@@ -113,6 +209,7 @@ app.get('/api/recordings', requireR2, async (req, res) => {
     const lessonsPromise = (hasLessonsApi && !skipLessonsInList) ? fetchLessons() : Promise.resolve([]);
     const [r2List, lessons] = await Promise.all([r2Promise, lessonsPromise]);
 
+    setVideoAccessCookie(res);
     const lessonMap = new Map((Array.isArray(lessons) ? lessons : []).map(l => [l.id, l]));
 
     for (const rec of r2List) {
@@ -124,6 +221,7 @@ app.get('/api/recordings', requireR2, async (req, res) => {
       rec.materia = lesson?.materia ?? null;
       rec.frente = lesson?.frente ?? null;
       rec.cursos = Array.isArray(lesson?.cursos) ? lesson.cursos : [];
+      rec.ativo = lesson?.ativo ?? true;
     }
 
     res.json(r2List);
@@ -133,19 +231,54 @@ app.get('/api/recordings', requireR2, async (req, res) => {
   }
 });
 
-/** URL do vídeo .mp4 (presignada ou redirect) */
-app.get('/api/recordings/video', requireR2, async (req, res) => {
+/** Middleware: exige token JWT OU cookie legado (se VIDEO_ACCESS_SECRET não definido) */
+function requireVideoAuth(req, res, next) {
+  if (!VIDEO_ACCESS_SECRET) {
+    const cookie = req.cookies?.[VIDEO_ACCESS_COOKIE];
+    if (!cookie || cookie.length < 32) return res.status(403).json({ error: 'Acesso negado. Acesse a plataforma primeiro.' });
+    return next();
+  }
+  const { path: p, session, token } = req.query;
+  const payload = verifyVideoToken(token);
+  if (!payload) {
+    console.log('[video] 403: token inválido ou expirado (veja JWT verify error acima)');
+    return res.status(403).json({ error: 'Token inválido ou expirado. Obtenha novo token na plataforma.' });
+  }
+  if (payload.path !== p || payload.session !== session) {
+    console.log('[video] 403: path/session mismatch', { payloadPath: payload.path, queryPath: p, payloadSession: payload.session, querySession: session });
+    return res.status(403).json({ error: 'Token inválido ou expirado. Obtenha novo token na plataforma.' });
+  }
+  next();
+}
+
+/** Stream do vídeo .mp4. Exige token JWT (obtido do Java) ou cookie legado. */
+app.get('/api/recordings/video', requireR2, requireVideoAuth, async (req, res) => {
   try {
     const { path: p, session } = req.query;
     if (!p || !session) return res.status(400).json({ error: 'path e session obrigatórios' });
     const key = `${R2_VIDEOS_PREFIX}${p}/${session}.mp4`;
-    if (process.env.USE_PRESIGNED === '1') {
-      const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
-      return res.redirect(url);
-    }
-    const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    const rangeHeader = req.headers.range;
+    const params = { Bucket: R2_BUCKET, Key: key };
+    if (rangeHeader) params.Range = rangeHeader;
+    const obj = await s3.send(new GetObjectCommand(params));
     res.set('Content-Type', 'video/mp4');
+    res.set('Accept-Ranges', 'bytes');
     if (obj.ContentLength) res.set('Content-Length', String(obj.ContentLength));
+    if (rangeHeader) {
+      res.status(206);
+      let contentRange = obj.ContentRange;
+      if (!contentRange) {
+        const head = await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+        const total = head.ContentLength || 0;
+        const m = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+        if (m) {
+          const start = m[1] ? parseInt(m[1], 10) : 0;
+          const end = m[2] ? parseInt(m[2], 10) : total - 1;
+          contentRange = `bytes ${start}-${end}/${total}`;
+        }
+      }
+      if (contentRange) res.set('Content-Range', contentRange);
+    }
     const body = obj.Body;
     if (body && typeof body.pipe === 'function') {
       body.pipe(res);
@@ -182,13 +315,13 @@ app.put('/api/recordings/name', requireR2, async (req, res) => {
 /** Atualiza metadata completa - proxy para API Lessons */
 app.put('/api/recordings/metadata', requireR2, async (req, res) => {
   try {
-    const { id, numero, nome, assunto, professor, materia, frente, cursos } = req.body;
+    const { id, numero, nome, assunto, professor, materia, frente, cursos, ativo } = req.body;
     if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id obrigatório' });
     if (!hasLessonsApi) return res.status(503).json({ error: 'API Lessons não configurada. Defina LESSONS_API_URL e LESSONS_API_TOKEN.' });
     const res2 = await fetch(`${LESSONS_API_URL}/api/lessons`, {
       method: 'PUT',
       headers: lessonsHeaders,
-      body: JSON.stringify({ id, numero, nome, assunto, professor, materia, frente, cursos })
+      body: JSON.stringify({ id, numero, nome, assunto, professor, materia, frente, cursos, ativo })
     });
     const data = await res2.json().catch(() => ({}));
     if (!res2.ok) return res.status(res2.status).json(data);
@@ -221,6 +354,7 @@ app.get('/api/cursos', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API rodando na porta ${PORT}`);
+  if (!VIDEO_ACCESS_SECRET) console.log('VIDEO_ACCESS_SECRET não configurado — vídeo e live exigem token JWT do Java');
   if (!hasR2) console.log('R2 não configurado — aba Gravações desabilitada');
   if (!hasLessonsApi) console.log('API Lessons não configurada — metadata desabilitada');
 });

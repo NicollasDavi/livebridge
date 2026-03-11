@@ -1,6 +1,12 @@
 # LiveBridge
 
-Servidor de streaming ao vivo com HLS. Simples, com áudio e delay ~5-10s.
+Servidor de streaming ao vivo com HLS.
+
+**📖 [Documentação Técnica](DOCUMENTACAO_TECNICA.md)** — Explicação extensa de cada arquivo, configuração e trecho de código, com o propósito de cada decisão técnica.
+
+**📋 [Manual de Manutenção](MANUTENCAO.md)** — Guia prático para operação e troubleshooting.
+
+**🔗 [API para Frontend](docs/API_FRONTEND.md)** — Rotas, parâmetros e exemplos para o frontend assistir aulas (ao vivo e gravações).
 
 ## Início rápido
 
@@ -66,7 +72,7 @@ O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e 
 2. Durante a live, o MediaMTX grava segmentos localmente
 3. Ao encerrar a transmissão, o **serviço merge** (após ~2 min sem novos segmentos) concatena tudo em um `.mp4` e envia ao R2
 4. A aba **Gravações** lista e reproduz os vídeos completos
-5. É possível **dar nomes customizados** às aulas gravadas: clique no ícone de lápis ao lado de cada gravação
+5. É possível **editar a metadata** das aulas gravadas (número, nome, assunto, professor, matéria, frente, cursos, ativo): clique no ícone de lápis ao lado de cada gravação
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 

@@ -9,7 +9,7 @@ services:
       - mediamtx-hls:/hls
     ports:
       - "1935:1935"   # RTMP (OBS)
-      - "8888:8888"   # HLS
+      # 8888 não exposto — HLS só via nginx (porta 8081) com auth
 
   merge:
     build: ./merge
@@ -35,16 +35,16 @@ services:
     container_name: livebridge-api
     restart: unless-stopped
     environment:
+      VIDEO_ACCESS_SECRET: ${VIDEO_ACCESS_SECRET:-}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       USE_PRESIGNED: ${USE_PRESIGNED:-0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:4200,http://localhost:8081}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
       R2_SECRET_KEY: ${R2_SECRET_KEY:-}
       R2_BUCKET: ${R2_BUCKET:-livebridge}
       LESSONS_API_URL: ${LESSONS_API_URL:-http://host.docker.internal:8080}
       LESSONS_API_TOKEN: ${LESSONS_API_TOKEN:-}
       SKIP_LESSONS_API: ${SKIP_LESSONS_API:-0}
-    ports:
-      - "3000:3000"
 
   nginx:
     image: nginx:alpine
