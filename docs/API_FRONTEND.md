@@ -142,7 +142,29 @@ hls.attachMedia(videoElement);
 
 ---
 
-## 4. Modo legado (sem VIDEO_ACCESS_SECRET)
+## 5. Listagem e metadata
+
+### `GET /api/recordings` (LiveBridge)
+
+Retorna gravações do R2 com metadata da API Lessons. Cada item inclui:
+
+| Campo | Descrição |
+|-------|-----------|
+| `ativo` | `true` = visível para alunos, `false` = oculta. Obtido do Java; padrão `true` se ausente. |
+
+### `PUT /api/recordings/metadata` (LiveBridge → Java)
+
+Atualiza metadata. O campo `ativo` é sempre enviado ao Java (`true` ou `false`).
+
+**Importante:** A API Java deve retornar `ativo` em `GET /api/lessons` e aceitar `ativo` em `PUT /api/lessons`.
+
+**Formato da resposta `GET /api/lessons`:** O LiveBridge aceita array direto ou objeto com `content`, `data`, `lessons` ou `items`. Cada aula deve ter `id` (formato `path|session`, ex: `live/teste|2026-03-10_16-33-50`) ou `path`+`session` separados. O nome da aula em `titulo` ou `nome`.
+
+**Servidor Linux:** `host.docker.internal` pode não funcionar. Use o IP do host (ex: `http://172.17.0.1:8080`) ou adicione `extra_hosts: ["host.docker.internal:host-gateway"]` no serviço api do docker-compose.
+
+---
+
+## 6. Modo legado (sem VIDEO_ACCESS_SECRET)
 
 Quando `VIDEO_ACCESS_SECRET` não está definido:
 

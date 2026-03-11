@@ -7,7 +7,7 @@ import { S3Client } from '@aws-sdk/client-s3';
 import cors from 'cors';
 
 const app = express();
-const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4200,http://localhost:8081').split(',').map(s => s.trim());
+const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,https://api.posihub.com.br,http://localhost:8081').split(',').map(s => s.trim());
 app.use(cors({
   origin: (origin, callback) => {
     if (origin && corsOrigins.includes(origin)) {
@@ -101,6 +101,13 @@ const LESSONS_TIMEOUT_MS = parseInt(process.env.LESSONS_TIMEOUT_MS || '2000', 10
 const LESSONS_CACHE_MS = parseInt(process.env.LESSONS_CACHE_MS || '30000', 10); // 30s cache
 
 let lessonsCache = { data: null, ts: 0 };
+function extractLessonsArray(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    return data.content ?? data.data ?? data.lessons ?? data.items ?? [];
+  }
+  return [];
+}
 async function fetchLessons() {
   if (!hasLessonsApi) return [];
   const now = Date.now();
@@ -112,8 +119,19 @@ async function fetchLessons() {
     const t = setTimeout(() => ctrl.abort(), LESSONS_TIMEOUT_MS);
     const res = await fetch(`${LESSONS_API_URL}/api/lessons`, { headers: lessonsHeaders, signal: ctrl.signal });
     clearTimeout(t);
-    if (!res.ok) return lessonsCache.data || [];
-    const data = await res.json();
+    if (!res.ok) {
+      console.warn('[API] Lessons API respondeu', res.status, res.statusText);
+      return lessonsCache.data || [];
+    }
+    const raw = await res.json();
+    const data = extractLessonsArray(raw);
+    if (!Array.isArray(data)) {
+      console.warn('[API] Lessons API retornou formato inesperado');
+      return lessonsCache.data || [];
+    }
+    if (process.env.DEBUG_LESSONS && data.length > 0) {
+      console.log('[API] Lessons sample:', JSON.stringify(data[0]));
+    }
     lessonsCache = { data, ts: now };
     return data;
   } catch (e) {
@@ -210,11 +228,15 @@ app.get('/api/recordings', requireR2, async (req, res) => {
     const [r2List, lessons] = await Promise.all([r2Promise, lessonsPromise]);
 
     setVideoAccessCookie(res);
-    const lessonMap = new Map((Array.isArray(lessons) ? lessons : []).map(l => [l.id, l]));
+    const lessonMap = new Map();
+    for (const l of Array.isArray(lessons) ? lessons : []) {
+      const key = l.id ?? (l.path && l.session ? `${l.path}|${l.session}` : null);
+      if (key) lessonMap.set(key, l);
+    }
 
     for (const rec of r2List) {
       const lesson = lessonMap.get(rec.id);
-      rec.name = lesson?.titulo ?? null;
+      rec.name = lesson?.titulo ?? lesson?.nome ?? null;
       rec.numero = lesson?.aula ?? null;
       rec.assunto = lesson?.assunto ?? null;
       rec.professor = lesson?.professor ?? null;
@@ -318,10 +340,11 @@ app.put('/api/recordings/metadata', requireR2, async (req, res) => {
     const { id, numero, nome, assunto, professor, materia, frente, cursos, ativo } = req.body;
     if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id obrigatório' });
     if (!hasLessonsApi) return res.status(503).json({ error: 'API Lessons não configurada. Defina LESSONS_API_URL e LESSONS_API_TOKEN.' });
+    const ativoValue = ativo === false || ativo === 'false' ? false : true;
     const res2 = await fetch(`${LESSONS_API_URL}/api/lessons`, {
       method: 'PUT',
       headers: lessonsHeaders,
-      body: JSON.stringify({ id, numero, nome, assunto, professor, materia, frente, cursos, ativo })
+      body: JSON.stringify({ id, numero, nome, assunto, professor, materia, frente, cursos, ativo: ativoValue })
     });
     const data = await res2.json().catch(() => ({}));
     if (!res2.ok) return res.status(res2.status).json(data);
