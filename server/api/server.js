@@ -253,23 +253,18 @@ app.get('/api/recordings', requireR2, async (req, res) => {
   }
 });
 
-/** Middleware: exige token JWT OU cookie legado (se VIDEO_ACCESS_SECRET não definido) */
+/** Middleware: exige token JWT OU cookie vid_ctx (player embutido do LiveBridge) */
 function requireVideoAuth(req, res, next) {
-  if (!VIDEO_ACCESS_SECRET) {
-    const cookie = req.cookies?.[VIDEO_ACCESS_COOKIE];
-    if (!cookie || cookie.length < 32) return res.status(403).json({ error: 'Acesso negado. Acesse a plataforma primeiro.' });
-    return next();
-  }
   const { path: p, session, token } = req.query;
-  const payload = verifyVideoToken(token);
-  if (!payload) {
-    console.log('[video] 403: token inválido ou expirado (veja JWT verify error acima)');
+  const cookie = req.cookies?.[VIDEO_ACCESS_COOKIE];
+
+  if (VIDEO_ACCESS_SECRET) {
+    const payload = verifyVideoToken(token);
+    if (payload && payload.path === p && payload.session === session) return next();
+    if (cookie && cookie.length >= 32) return next();
     return res.status(403).json({ error: 'Token inválido ou expirado. Obtenha novo token na plataforma.' });
   }
-  if (payload.path !== p || payload.session !== session) {
-    console.log('[video] 403: path/session mismatch', { payloadPath: payload.path, queryPath: p, payloadSession: payload.session, querySession: session });
-    return res.status(403).json({ error: 'Token inválido ou expirado. Obtenha novo token na plataforma.' });
-  }
+  if (!cookie || cookie.length < 32) return res.status(403).json({ error: 'Acesso negado. Acesse a plataforma primeiro.' });
   next();
 }
 
