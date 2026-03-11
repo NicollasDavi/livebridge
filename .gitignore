@@ -6,6 +6,9 @@ server/stream/*
 server/recordings/*
 !server/recordings/.gitkeep
 
+# Certificados SSL autoassinados (gerar com scripts/generate-self-signed-cert.sh)
+server/certs/
+
 # Node
 node_modules/
 
