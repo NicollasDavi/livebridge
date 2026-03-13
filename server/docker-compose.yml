@@ -62,7 +62,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8081:80"
+      - "8081:8080"
 
 volumes:
   mediamtx-hls:
