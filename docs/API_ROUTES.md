@@ -9,9 +9,10 @@ Documentação completa das rotas do LiveBridge, da API Java e do fluxo de integ
 1. [Configuração](#configuração)
 2. [Gravações (VOD)](#gravações-vod)
 3. [Live (HLS)](#live-hls)
-4. [Listagem e metadata](#listagem-e-metadata)
-5. [Rotas auxiliares](#rotas-auxiliares)
-6. [Modo legado](#modo-legado)
+4. [Fluxo Live Ended (Aula acabou)](#fluxo-live-ended-aula-acabou)
+5. [Listagem e metadata](#listagem-e-metadata)
+6. [Rotas auxiliares](#rotas-auxiliares)
+7. [Modo legado](#modo-legado)
 
 ---
 
@@ -278,6 +279,125 @@ const hlsUrl = `${LIVEBRIDGE_URL}/hls/live/matematica/index.m3u8`;
 hls.loadSource(hlsUrl);
 hls.attachMedia(videoElement);
 ```
+
+---
+
+## Fluxo Live Ended (Aula acabou)
+
+Quando o operador clica em "Aula acabou" durante a live, o servidor descobre o `path` e `session` no disco, dispara o merge em background e registra o vídeo na API de Vídeos ao concluir.
+
+### Fluxo completo
+
+```
+┌──────────┐  POST /api/recordings/live-ended   ┌────────────┐
+│ Frontend │  { streamName: "matematica" }      │ LiveBridge │
+│          │ ─────────────────────────────────► │ API       │
+│          │                                     │            │
+│          │  GET /api/recordings/status         │ Descobre   │
+│          │  ?streamName=matematica (polling)   │ path/session
+│          │ ◄─────────────────────────────────│ Chama merge
+└──────────┘                                     └─────┬──────┘
+                                                       │
+                                                       ▼
+                                               ┌──────────────┐
+                                               │ Merge        │
+                                               │ Concat+Upload│
+                                               └──────┬───────┘
+                                                      │
+                                                      │ POST /api/recordings/upload-complete
+                                                      ▼
+                                               ┌──────────────┐
+                                               │ API          │
+                                               │ POST /api/videos
+                                               └──────────────┘
+```
+
+### 1. LiveBridge: `POST /api/recordings/live-ended`
+
+**Request:**
+```
+POST {LIVEBRIDGE_URL}/api/recordings/live-ended
+Content-Type: application/json
+Body: { "streamName": "matematica" }
+```
+
+| Campo | Tipo | Obrigatório | Descrição |
+|-------|------|-------------|-----------|
+| `streamName` | string | sim | Nome do stream. Ex: `matematica` |
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "path": "live/matematica",
+  "session": "2025-03-09_16-33-50",
+  "status": "processing",
+  "message": "Gravação finalizada. Processamento iniciado em background."
+}
+```
+
+**Erros:**
+| Status | Descrição |
+|--------|-----------|
+| 400 | `streamName` ausente |
+| 404 | Nenhuma sessão de gravação ativa encontrada |
+
+---
+
+### 2. LiveBridge: `GET /api/recordings/status`
+
+**Request:**
+```
+GET {LIVEBRIDGE_URL}/api/recordings/status?streamName=matematica
+```
+
+| Parâmetro | Descrição |
+|-----------|-----------|
+| `streamName` | Nome do stream (obrigatório) |
+
+**Response 200 (exemplos):**
+
+| status | Descrição |
+|--------|-----------|
+| `live` | Gravando em andamento |
+| `processing` | Compactando e enviando para R2 |
+| `ready` | Pronto; `videoPath` disponível |
+| `no_session` | Nenhuma sessão ativa |
+
+```json
+{
+  "path": "live/matematica",
+  "session": "2025-03-09_16-33-50",
+  "status": "ready",
+  "videoPath": "live/matematica/2025-03-09_16-33-50.mp4",
+  "message": "Pronto"
+}
+```
+
+**Uso no frontend (polling):**
+```javascript
+const pollStatus = async () => {
+  const res = await fetch(`${LIVEBRIDGE_URL}/api/recordings/status?streamName=matematica`);
+  const data = await res.json();
+  if (data.status === 'ready') {
+    console.log('Vídeo pronto:', data.videoPath);
+    return;
+  }
+  if (data.status === 'processing') setTimeout(pollStatus, 3000);
+};
+```
+
+---
+
+### 3. LiveBridge: `POST /api/recordings/upload-complete` (interno)
+
+Chamado pelo serviço Merge quando o upload para R2 conclui. Registra o vídeo na API de Vídeos com `path` completo (ex.: `live/matematica/2025-03-09_16-33-50.mp4`).
+
+**Variáveis de ambiente necessárias:**
+| Variável | Descrição |
+|----------|-----------|
+| `VIDEOS_API_URL` | URL da API de Vídeos |
+| `VIDEOS_API_TOKEN` | Token para `POST /api/videos` |
 
 ---
 

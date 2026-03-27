@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LiveBridge API</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; color: #333; }
+    h1 { font-size: 1.25rem; }
+    code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 4px; }
+    ul { line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <h1>LiveBridge API</h1>
+  <p>Frontend removido. Use seu frontend em outra URL.</p>
+  <p>API disponível em:</p>
+  <ul>
+    <li><code>/api/recordings</code> — listar gravações</li>
+    <li><code>/api/recordings/video</code> — stream MP4</li>
+    <li><code>/api/init-live</code> — iniciar live</li>
+    <li><code>/api/live/hls-master.m3u8?streamName={stream}</code> — HLS ABR (1080 / 720 / 480)</li>
+    <li><code>/hls/live/{stream}/index.m3u8</code> — HLS qualidade da OBS (ingest)</li>
+  </ul>
+  <p>Documentação: <code>docs/Frontend-Externo.md</code></p>
+</body>
+</html>

@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Comparativo Pós-Processamento de Vídeo</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 24px; }
+h1 { color: #003366; font-size: 24px; border-bottom: 2px solid #003366; padding-bottom: 8px; }
+h2 { color: #004c99; font-size: 18px; margin-top: 28px; }
+h3 { color: #0066cc; font-size: 15px; margin-top: 18px; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13px; }
+th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+th { background: #e8eef5; font-weight: bold; }
+pre { background: #f5f5f5; padding: 12px; overflow-x: auto; font-size: 11px; border-radius: 4px; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+ul { margin: 10px 0; padding-left: 24px; }
+li { margin: 6px 0; }
+hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+@media print { body { margin: 1.5cm; } }
+</style>
+</head>
+<body>
+<h1>Comparativo Técnico: Duas Abordagens de Pós-Processamento de Vídeo</h1>
+<p><strong>Documento técnico completo</strong><br />
+<em>PosiLive – Análise detalhada das estratégias de compressão e disponibilização de gravações</em></p>
+<hr />
+<h2>Índice</h2>
+<ol>
+<li><a href="#1-visão-geral">Visão Geral</a></li>
+<li><a href="#2-pré-requisitos-e-contexto">Pré-requisitos e Contexto</a></li>
+<li><a href="#3-abordagem-a-compressão-por-segmento">Abordagem A: Compressão por Segmento</a></li>
+<li><a href="#4-abordagem-b-copy--preset-slow-em-background">Abordagem B: Copy + Preset Slow em Background</a></li>
+<li><a href="#5-comparativo-direto">Comparativo Direto</a></li>
+<li><a href="#6-estimativas-de-custo-detalhadas">Estimativas de Custo Detalhadas</a></li>
+<li><a href="#7-código-de-referência-completo">Código de Referência Completo</a></li>
+<li><a href="#8-cenários-e-recomendações">Cenários e Recomendações</a></li>
+<li><a href="#9-alternativas-e-híbridos">Alternativas e Híbridos</a></li>
+<li><a href="#10-detalhes-adicionais">Detalhes Adicionais</a></li>
+<li><a href="#11-monitoramento-e-troubleshooting">Monitoramento e Troubleshooting</a></li>
+</ol>
+<hr />
+<h2>1. Visão Geral</h2>
+<h3>1.1 As Duas Abordagens</h3>
+<table>
+<thead>
+<tr>
+<th>Abordagem</th>
+<th>Descrição resumida</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A</strong></td>
+<td>Comprimir cada segmento <code>.ts</code> assim que é criado durante a live. Ao final, concatenar e enviar para o R2.</td>
+</tr>
+<tr>
+<td><strong>B</strong></td>
+<td>Concatenar <code>.ts</code> em MP4 (copy) e servir da VM. Em paralelo, comprimir com preset slow e enviar para o R2 quando pronto.</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 Trade-off Principal</h3>
+<div class="codehilite"><pre><span></span><code><span class="nx">Abordagem</span><span class="w"> </span><span class="nx">A</span><span class="p">:</span><span class="w"> </span><span class="nx">Velocidade</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">Simplicidade</span><span class="w"> </span><span class="nx">de</span><span class="w"> </span><span class="nx">destino</span><span class="w">  </span><span class="nx">vs</span><span class="w">  </span><span class="nx">Tamanho</span><span class="w"> </span><span class="o">~</span><span class="mi">5</span><span class="o">-</span><span class="mi">15</span><span class="o">%</span><span class="w"> </span><span class="nx">maior</span>
+<span class="nx">Abordagem</span><span class="w"> </span><span class="nx">B</span><span class="p">:</span><span class="w"> </span><span class="nx">Máxima</span><span class="w"> </span><span class="nx">compressão</span><span class="w">  </span><span class="nx">vs</span><span class="w">  </span><span class="nx">Egress</span><span class="w"> </span><span class="nx">GCP</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">Complexidade</span><span class="w"> </span><span class="nx">de</span><span class="w"> </span><span class="nx">dois</span><span class="w"> </span><span class="nx">períodos</span>
+</code></pre></div>
+
+<hr />
+<h2>2. Pré-requisitos e Contexto</h2>
+<h3>2.1 Cenário Base</h3>
+<table>
+<thead>
+<tr>
+<th>Parâmetro</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Duração da live</td>
+<td>45–50 min</td>
+</tr>
+<tr>
+<td>Segmentos</td>
+<td>6–8 s cada</td>
+</tr>
+<tr>
+<td>Qualidades</td>
+<td>1080p, 720p, 480p</td>
+</tr>
+<tr>
+<td>Codec live</td>
+<td>H.264 (HLS)</td>
+</tr>
+<tr>
+<td>Destino final</td>
+<td>Cloudflare R2</td>
+</tr>
+<tr>
+<td>Prazo desejado</td>
+<td>Vídeo disponível em até 15 min</td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 Tamanhos de Arquivo (Referência)</h3>
+<table>
+<thead>
+<tr>
+<th>Formato</th>
+<th>45 min 1080p</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>.ts (raw)</td>
+<td>~4–5 GB</td>
+</tr>
+<tr>
+<td>MP4 copy</td>
+<td>~4–5 GB</td>
+</tr>
+<tr>
+<td>H.264 CRF 23 (preset fast)</td>
+<td>~1,5 GB</td>
+</tr>
+<tr>
+<td>H.264 CRF 23 (preset slow)</td>
+<td>~1,0 GB</td>
+</tr>
+<tr>
+<td>H.265 CQ 23 (hevc_nvenc p7)</td>
+<td>~1,0–1,1 GB</td>
+</tr>
+<tr>
+<td>H.265 por segmento</td>
+<td>~1,05–1,2 GB</td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 Regiões e Preços GCP (Referência)</h3>
+<table>
+<thead>
+<tr>
+<th>Região</th>
+<th>vCPU/h</th>
+<th>Egress/GB</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>southamerica-east1 (SP)</td>
+<td>~0,04</td>
+<td>~0,12</td>
+</tr>
+<tr>
+<td>southamerica-west1 (Chile)</td>
+<td>~0,032</td>
+<td>~0,12</td>
+</tr>
+<tr>
+<td>northamerica-south1 (México)</td>
+<td>~0,025</td>
+<td>~0,12</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>3. Abordagem A: Compressão por Segmento</h2>
+<h3>3.1 Fluxo Técnico Detalhado</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[Durante a live - 45 min]</span>
+<span class="w">  </span><span class="na">FFmpeg (live) → segmentos .ts</span>
+<span class="w">       </span><span class="na">│</span>
+<span class="w">       </span><span class="na">├─ inotifywait detecta close_write em /recordings/live_1080p/</span>
+<span class="w">       </span><span class="na">├─ Para cada novo segN.ts</span><span class="o">:</span>
+<span class="w">       </span><span class="na">│   ├─ FFmpeg</span><span class="o">:</span><span class="w"> </span><span class="s">segN.ts → hevc_nvenc → segN.mp4 (1080p)</span>
+<span class="w">       </span><span class="na">│   ├─ FFmpeg</span><span class="o">:</span><span class="w"> </span><span class="s">segN.ts → hevc_nvenc → segN.mp4 (720p)</span>
+<span class="w">       </span><span class="na">│   └─ FFmpeg</span><span class="o">:</span><span class="w"> </span><span class="s">segN.ts → hevc_nvenc → segN.mp4 (480p)</span>
+<span class="w">       </span><span class="na">│   (3 processos em paralelo)</span>
+
+<span class="k">[Fim da live - sinal via arquivo ou API]</span>
+<span class="w">       </span><span class="na">│</span>
+<span class="w">       </span><span class="na">├─ Ordenar seg*.mp4 por número</span>
+<span class="w">       </span><span class="na">├─ ffmpeg -f concat -i list.txt -c copy final_1080p.mp4</span>
+<span class="w">       </span><span class="na">├─ ffmpeg -f concat -i list.txt -c copy final_720p.mp4</span>
+<span class="w">       </span><span class="na">├─ ffmpeg -f concat -i list.txt -c copy final_480p.mp4</span>
+<span class="w">       </span><span class="na">├─ rclone copy final_*.mp4 r2</span><span class="o">:</span><span class="s">bucket/recordings/YYYY/MM/DD/</span>
+<span class="w">       </span><span class="na">└─ rm -rf segmentos .ts e .mp4 intermediários</span>
+</code></pre></div>
+
+<h3>3.2 Infraestrutura</h3>
+<table>
+<thead>
+<tr>
+<th>Componente</th>
+<th>Especificação</th>
+<th>Justificativa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>VM</strong></td>
+<td>n1-standard-8 ou e2-standard-8</td>
+<td>8 vCPU para decode/scale/mux</td>
+</tr>
+<tr>
+<td><strong>GPU</strong></td>
+<td>NVIDIA T4</td>
+<td>NVENC para encode em ~1–2 s/segmento</td>
+</tr>
+<tr>
+<td><strong>RAM</strong></td>
+<td>16 GB</td>
+<td>3 FFmpeg + live transcode</td>
+</tr>
+<tr>
+<td><strong>Disco</strong></td>
+<td>100–200 GB SSD</td>
+<td>.ts + .mp4 intermediários</td>
+</tr>
+<tr>
+<td><strong>Região</strong></td>
+<td>México ou Chile</td>
+<td>Custo menor</td>
+</tr>
+</tbody>
+</table>
+<h3>3.3 Tempos por Etapa</h3>
+<table>
+<thead>
+<tr>
+<th>Etapa</th>
+<th>Duração</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Compressão por segmento (8 s)</td>
+<td>~1–2 s (3 qualidades em paralelo)</td>
+</tr>
+<tr>
+<td>Concat final</td>
+<td>~1–2 min</td>
+</tr>
+<tr>
+<td>Upload R2 (3 qualidades)</td>
+<td>~2–4 min</td>
+</tr>
+<tr>
+<td><strong>Total após live</strong></td>
+<td><strong>~3–6 min</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>3.4 Configuração FFmpeg (hevc_nvenc)</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1080p - qualidade máxima NVENC</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>seg.ts<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>hevc_nvenc<span class="w"> </span>-preset<span class="w"> </span>p7<span class="w"> </span>-tune<span class="w"> </span>hq<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc<span class="w"> </span>vbr<span class="w"> </span>-cq<span class="w"> </span><span class="m">23</span><span class="w"> </span>-b:v<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc-lookahead<span class="w"> </span><span class="m">32</span><span class="w"> </span>-bf<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-vf<span class="w"> </span><span class="nv">scale</span><span class="o">=</span><span class="m">1920</span>:1080<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>128k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>seg.mp4
+
+<span class="c1"># 720p</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>seg.ts<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>hevc_nvenc<span class="w"> </span>-preset<span class="w"> </span>p7<span class="w"> </span>-tune<span class="w"> </span>hq<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc<span class="w"> </span>vbr<span class="w"> </span>-cq<span class="w"> </span><span class="m">23</span><span class="w"> </span>-b:v<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc-lookahead<span class="w"> </span><span class="m">32</span><span class="w"> </span>-bf<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-vf<span class="w"> </span><span class="nv">scale</span><span class="o">=</span><span class="m">1280</span>:720<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>128k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>seg.mp4
+
+<span class="c1"># 480p</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>seg.ts<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>hevc_nvenc<span class="w"> </span>-preset<span class="w"> </span>p7<span class="w"> </span>-tune<span class="w"> </span>hq<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc<span class="w"> </span>vbr<span class="w"> </span>-cq<span class="w"> </span><span class="m">23</span><span class="w"> </span>-b:v<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-rc-lookahead<span class="w"> </span><span class="m">32</span><span class="w"> </span>-bf<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-vf<span class="w"> </span><span class="nv">scale</span><span class="o">=</span><span class="m">854</span>:480<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>96k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>seg.mp4
+</code></pre></div>
+
+<h3>3.5 Tamanho e Qualidade</h3>
+<table>
+<thead>
+<tr>
+<th>Métrica</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tamanho 45 min 1080p</td>
+<td>~1,05–1,15 GB</td>
+</tr>
+<tr>
+<td>vs preset slow</td>
+<td>~5–15% maior</td>
+</tr>
+<tr>
+<td>Causa</td>
+<td>Keyframe a cada 6–8 s, GOP limitado por segmento</td>
+</tr>
+</tbody>
+</table>
+<h3>3.6 Custos Mensais</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VM n1-standard-8 + T4 (México)</td>
+<td>~US$ 280</td>
+</tr>
+<tr>
+<td>Disco 100 GB</td>
+<td>~US$ 5</td>
+</tr>
+<tr>
+<td>R2 7 TB</td>
+<td>~US$ 105</td>
+</tr>
+<tr>
+<td>Egress R2</td>
+<td>US$ 0</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>~US$ 390</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>3.7 Vantagens</h3>
+<ul>
+<li>Vídeo disponível em 3–6 min</li>
+<li>Sem copy temporário no R2 (sem pico de storage)</li>
+<li>Sem egress da VM para streaming</li>
+<li>Um único destino final (R2)</li>
+<li>Carga distribuída durante a live</li>
+<li>GPU faz o trabalho pesado</li>
+</ul>
+<h3>3.8 Desvantagens</h3>
+<ul>
+<li>Arquivos ~5–15% maiores</li>
+<li>Depende de GPU</li>
+<li>Implementação mais complexa (watcher, concat, limpeza)</li>
+<li>H.265 com suporte limitado em alguns navegadores</li>
+</ul>
+<hr />
+<h2>4. Abordagem B: Copy + Preset Slow em Background</h2>
+<h3>4.1 Fluxo Técnico Detalhado</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[Fim da live]</span>
+<span class="w">  </span><span class="na">1. Concat .ts → MP4 (copy)</span>
+<span class="w">     </span><span class="na">ffmpeg -f concat -safe 0 -i list.txt -c copy temp_1080p.mp4</span>
+<span class="w">     </span><span class="na">Tempo</span><span class="o">:</span><span class="w"> </span><span class="s">~2–3 min</span>
+<span class="w">  </span><span class="na">2. MP4 em /recordings/temp/</span>
+<span class="w">  </span><span class="na">3. Nginx (ou similar) serve temp_1080p.mp4</span>
+<span class="w">     </span><span class="na">URL</span><span class="o">:</span><span class="w"> </span><span class="s">https://vm.example.com/recordings/aula_123_1080p.mp4</span>
+<span class="w">  </span><span class="na">4. Alunos assistem → egress GCP</span>
+
+<span class="k">[Em paralelo - background]</span>
+<span class="w">  </span><span class="na">5. ffmpeg -i temp_1080p.mp4 -c</span><span class="o">:</span><span class="s">v libx264 -preset slow -crf 23 ...</span>
+<span class="w">     </span><span class="na">Tempo</span><span class="o">:</span><span class="w"> </span><span class="s">~90–120 min (1080p)</span>
+<span class="w">  </span><span class="na">6. 720p</span><span class="o">:</span><span class="w"> </span><span class="s">~60–80 min</span>
+<span class="w">  </span><span class="na">7. 480p</span><span class="o">:</span><span class="w"> </span><span class="s">~40–50 min</span>
+<span class="w">  </span><span class="na">8. 3 em paralelo → gargalo 1080p ~2 h</span>
+<span class="w">  </span><span class="na">9. Upload final_*.mp4 para R2</span>
+<span class="w">  </span><span class="na">10. Atualizar URL no sistema (VM → R2)</span>
+<span class="w">  </span><span class="na">11. rm temp_*.mp4</span>
+</code></pre></div>
+
+<h3>4.2 Infraestrutura</h3>
+<table>
+<thead>
+<tr>
+<th>Componente</th>
+<th>Especificação</th>
+<th>Justificativa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>VM</strong></td>
+<td>e2-standard-16 ou n1-standard-16</td>
+<td>16 vCPU para preset slow</td>
+</tr>
+<tr>
+<td><strong>GPU</strong></td>
+<td>Não</td>
+<td>libx264 preset slow</td>
+</tr>
+<tr>
+<td><strong>RAM</strong></td>
+<td>32 GB</td>
+<td>3 processos libx264</td>
+</tr>
+<tr>
+<td><strong>Disco</strong></td>
+<td>200–300 GB SSD</td>
+<td>temp + comprimido</td>
+</tr>
+<tr>
+<td><strong>Rede</strong></td>
+<td>Egress GCP</td>
+<td>Streaming do temp</td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 Tempos por Etapa</h3>
+<table>
+<thead>
+<tr>
+<th>Etapa</th>
+<th>Duração</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Concat .ts → MP4</td>
+<td>~2–3 min</td>
+</tr>
+<tr>
+<td><strong>Vídeo disponível (temp)</strong></td>
+<td><strong>~5 min</strong></td>
+</tr>
+<tr>
+<td>Encode preset slow</td>
+<td>~90–120 min</td>
+</tr>
+<tr>
+<td>Upload R2</td>
+<td>~2–3 min</td>
+</tr>
+<tr>
+<td><strong>Versão final no R2</strong></td>
+<td><strong>~2 h</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>4.4 Configuração FFmpeg (libx264 preset slow)</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1080p</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>temp_1080p.mp4<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>libx264<span class="w"> </span>-preset<span class="w"> </span>slow<span class="w"> </span>-crf<span class="w"> </span><span class="m">23</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-profile<span class="w"> </span>high<span class="w"> </span>-level<span class="w"> </span><span class="m">4</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>128k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-movflags<span class="w"> </span>+faststart<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>final_1080p.mp4
+
+<span class="c1"># 720p</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>temp_720p.mp4<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>libx264<span class="w"> </span>-preset<span class="w"> </span>slow<span class="w"> </span>-crf<span class="w"> </span><span class="m">23</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-profile<span class="w"> </span>high<span class="w"> </span>-level<span class="w"> </span><span class="m">4</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>128k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-movflags<span class="w"> </span>+faststart<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>final_720p.mp4
+
+<span class="c1"># 480p</span>
+ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span>temp_480p.mp4<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:v<span class="w"> </span>libx264<span class="w"> </span>-preset<span class="w"> </span>slow<span class="w"> </span>-crf<span class="w"> </span><span class="m">23</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-profile<span class="w"> </span>high<span class="w"> </span>-level<span class="w"> </span><span class="m">3</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>96k<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-movflags<span class="w"> </span>+faststart<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>final_480p.mp4
+</code></pre></div>
+
+<h3>4.5 Tamanho e Qualidade</h3>
+<table>
+<thead>
+<tr>
+<th>Métrica</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tamanho 45 min 1080p</td>
+<td>~0,9–1,0 GB</td>
+</tr>
+<tr>
+<td>Qualidade</td>
+<td>Máxima (preset slow)</td>
+</tr>
+</tbody>
+</table>
+<h3>4.6 Custos Mensais</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VM e2-standard-16 (México)</td>
+<td>~US$ 280</td>
+</tr>
+<tr>
+<td>Disco 200 GB</td>
+<td>~US$ 10</td>
+</tr>
+<tr>
+<td>R2 7 TB (arquivos menores)</td>
+<td>~US$ 95</td>
+</tr>
+<tr>
+<td><strong>Egress GCP</strong></td>
+<td><strong>Variável</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>4.7 Custo de Egress GCP (Streaming do Temp)</h3>
+<table>
+<thead>
+<tr>
+<th>Visualizações (2 h)</th>
+<th>GB (1,5 GB/vídeo)</th>
+<th>Custo (~US$ 0,12/GB)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>20</td>
+<td>30</td>
+<td>~US$ 3,60</td>
+</tr>
+<tr>
+<td>50</td>
+<td>75</td>
+<td>~US$ 9</td>
+</tr>
+<tr>
+<td>100</td>
+<td>150</td>
+<td>~US$ 18</td>
+</tr>
+<tr>
+<td>200</td>
+<td>300</td>
+<td>~US$ 36</td>
+</tr>
+<tr>
+<td>500</td>
+<td>750</td>
+<td>~US$ 90</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>1500</td>
+<td>~US$ 180</td>
+</tr>
+</tbody>
+</table>
+<h3>4.8 Vantagens</h3>
+<ul>
+<li>Máxima compressão (preset slow)</li>
+<li>Vídeo disponível em ~5 min (temp)</li>
+<li>Sem GPU</li>
+<li>Compatibilidade total (H.264)</li>
+<li>Arquivo final menor no R2</li>
+</ul>
+<h3>4.9 Desvantagens</h3>
+<ul>
+<li>Egress GCP para streaming do temp</li>
+<li>Dois períodos (temp na VM, depois R2)</li>
+<li>Troca de URL quando comprimido sobe</li>
+<li>~2 h para versão final</li>
+<li>VM maior (16 vCPU, 32 GB)</li>
+</ul>
+<hr />
+<h2>5. Comparativo Direto</h2>
+<table>
+<thead>
+<tr>
+<th>Critério</th>
+<th>Abordagem A</th>
+<th>Abordagem B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tempo até disponível</td>
+<td>3–6 min</td>
+<td>~5 min</td>
+</tr>
+<tr>
+<td>Tempo até versão final</td>
+<td>3–6 min</td>
+<td>~2 h</td>
+</tr>
+<tr>
+<td>Tamanho 45 min 1080p</td>
+<td>~1,05–1,15 GB</td>
+<td>~0,9–1,0 GB</td>
+</tr>
+<tr>
+<td>GPU</td>
+<td>Obrigatória (T4)</td>
+<td>Não</td>
+</tr>
+<tr>
+<td>vCPU</td>
+<td>8</td>
+<td>16</td>
+</tr>
+<tr>
+<td>RAM</td>
+<td>16 GB</td>
+<td>32 GB</td>
+</tr>
+<tr>
+<td>Disco</td>
+<td>100–200 GB</td>
+<td>200–300 GB</td>
+</tr>
+<tr>
+<td>Egress GCP</td>
+<td>0</td>
+<td>Variável</td>
+</tr>
+<tr>
+<td>Custo VM</td>
+<td>~US$ 280 (com GPU)</td>
+<td>~US$ 280 (sem GPU)</td>
+</tr>
+<tr>
+<td>Custo R2 (7 TB)</td>
+<td>~US$ 105</td>
+<td>~US$ 95</td>
+</tr>
+<tr>
+<td>Troca de URL</td>
+<td>Não</td>
+<td>Sim</td>
+</tr>
+<tr>
+<td>Complexidade</td>
+<td>Maior</td>
+<td>Média</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. Estimativas de Custo Detalhadas</h2>
+<h3>6.1 Abordagem A – Custo Anual</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Mensal</th>
+<th>Anual</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VM + GPU</td>
+<td>280</td>
+<td>3.360</td>
+</tr>
+<tr>
+<td>Disco</td>
+<td>5</td>
+<td>60</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>105</td>
+<td>1.260</td>
+</tr>
+<tr>
+<td>Egress</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>390</strong></td>
+<td><strong>4.680</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>6.2 Abordagem B – Custo Anual (Cenários)</h3>
+<p><strong>Cenário 1: 20 views/temp por aula, 200 aulas/ano</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Mensal</th>
+<th>Anual</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VM</td>
+<td>280</td>
+<td>3.360</td>
+</tr>
+<tr>
+<td>Disco</td>
+<td>10</td>
+<td>120</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>95</td>
+<td>1.140</td>
+</tr>
+<tr>
+<td>Egress (20 × 1,5 GB × 200)</td>
+<td>60</td>
+<td>720</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>445</strong></td>
+<td><strong>5.340</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Cenário 2: 100 views/temp por aula</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Anual</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Egress (100 × 1,5 GB × 200)</td>
+<td>3.600</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>8.220</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Cenário 3: 500 views/temp por aula</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Anual</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Egress</td>
+<td>18.000</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>22.620</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>7. Código de Referência Completo</h2>
+<h3>7.1 Abordagem A – Watcher (segment-compress-watcher.sh)</h3>
+<div class="codehilite"><pre><span></span><code><span class="ch">#!/bin/bash</span>
+<span class="nb">set</span><span class="w"> </span>-e
+
+<span class="nv">RECORDINGS_BASE</span><span class="o">=</span><span class="s2">&quot;/recordings&quot;</span>
+<span class="nv">QUALITIES</span><span class="o">=(</span><span class="s2">&quot;1080p&quot;</span><span class="w"> </span><span class="s2">&quot;720p&quot;</span><span class="w"> </span><span class="s2">&quot;480p&quot;</span><span class="o">)</span>
+
+<span class="k">for</span><span class="w"> </span>QUALITY<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">QUALITIES</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nv">IN_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/live_</span><span class="nv">$QUALITY</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nv">OUT_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/compressed_</span><span class="nv">$QUALITY</span><span class="s2">&quot;</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OUT_DIR</span><span class="s2">&quot;</span>
+
+<span class="w">  </span><span class="k">case</span><span class="w"> </span><span class="nv">$QUALITY</span><span class="w"> </span><span class="k">in</span>
+<span class="w">    </span>1080p<span class="o">)</span><span class="w"> </span><span class="nv">SCALE</span><span class="o">=</span><span class="s2">&quot;1920:1080&quot;</span><span class="p">;</span><span class="w"> </span><span class="nv">AUDIO</span><span class="o">=</span><span class="s2">&quot;128k&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>720p<span class="o">)</span><span class="w">  </span><span class="nv">SCALE</span><span class="o">=</span><span class="s2">&quot;1280:720&quot;</span><span class="p">;</span><span class="w">  </span><span class="nv">AUDIO</span><span class="o">=</span><span class="s2">&quot;128k&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span>480p<span class="o">)</span><span class="w">  </span><span class="nv">SCALE</span><span class="o">=</span><span class="s2">&quot;854:480&quot;</span><span class="p">;</span><span class="w">   </span><span class="nv">AUDIO</span><span class="o">=</span><span class="s2">&quot;96k&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">  </span><span class="k">esac</span>
+
+<span class="w">  </span>inotifywait<span class="w"> </span>-m<span class="w"> </span>-e<span class="w"> </span>close_write<span class="w"> </span>--format<span class="w"> </span><span class="s1">&#39;%f&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$IN_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>file<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$file</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">==</span><span class="w"> </span>*.ts<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nv">base</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">file</span><span class="p">%.ts</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="w">      </span>ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$IN_DIR</span><span class="s2">/</span><span class="nv">$file</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>-c:v<span class="w"> </span>hevc_nvenc<span class="w"> </span>-preset<span class="w"> </span>p7<span class="w"> </span>-tune<span class="w"> </span>hq<span class="w"> </span>-rc<span class="w"> </span>vbr<span class="w"> </span>-cq<span class="w"> </span><span class="m">23</span><span class="w"> </span>-b:v<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>-rc-lookahead<span class="w"> </span><span class="m">32</span><span class="w"> </span>-bf<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>-vf<span class="w"> </span><span class="s2">&quot;scale=</span><span class="nv">$SCALE</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span><span class="nv">$AUDIO</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="nv">$OUT_DIR</span><span class="s2">/</span><span class="si">${</span><span class="nv">base</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">done</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="k">done</span>
+
+<span class="nb">wait</span>
+</code></pre></div>
+
+<h3>7.2 Abordagem A – Concat e Upload (concat-upload.sh)</h3>
+<div class="codehilite"><pre><span></span><code><span class="ch">#!/bin/bash</span>
+<span class="nb">set</span><span class="w"> </span>-e
+
+<span class="nv">RECORDINGS_BASE</span><span class="o">=</span><span class="s2">&quot;/recordings&quot;</span>
+<span class="nv">R2_BUCKET</span><span class="o">=</span><span class="s2">&quot;r2:bucket/recordings&quot;</span>
+<span class="nv">DATE_PATH</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%Y/%m/%d<span class="k">)</span>
+<span class="nv">STREAM_ID</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="nv">stream_001</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="k">for</span><span class="w"> </span>QUALITY<span class="w"> </span><span class="k">in</span><span class="w"> </span>1080p<span class="w"> </span>720p<span class="w"> </span>480p<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nv">COMPRESSED_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/compressed_</span><span class="nv">$QUALITY</span><span class="s2">&quot;</span>
+<span class="w">  </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COMPRESSED_DIR</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COMPRESSED_DIR</span><span class="s2">&quot;</span>
+
+<span class="w">  </span>ls<span class="w"> </span>-1v<span class="w"> </span>seg*.mp4<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>f<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;file &#39;</span><span class="nv">$f</span><span class="s2">&#39;&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span><span class="w"> </span>&gt;<span class="w"> </span>list.txt
+<span class="w">  </span>ffmpeg<span class="w"> </span>-y<span class="w"> </span>-f<span class="w"> </span>concat<span class="w"> </span>-safe<span class="w"> </span><span class="m">0</span><span class="w"> </span>-i<span class="w"> </span>list.txt<span class="w"> </span>-c<span class="w"> </span>copy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/final_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+
+<span class="w">  </span>rclone<span class="w"> </span>copy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/final_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R2_BUCKET</span><span class="s2">/</span><span class="nv">$DATE_PATH</span><span class="s2">/&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--config<span class="w"> </span>/rclone/rclone.conf<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-v
+
+<span class="w">  </span><span class="c1"># Limpeza</span>
+<span class="w">  </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COMPRESSED_DIR</span><span class="s2">&quot;</span>/*.mp4<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COMPRESSED_DIR</span><span class="s2">&quot;</span>/list.txt
+<span class="k">done</span>
+</code></pre></div>
+
+<h3>7.3 Abordagem B – Pipeline Completo (copy-slow-upload.sh)</h3>
+<div class="codehilite"><pre><span></span><code><span class="ch">#!/bin/bash</span>
+<span class="nb">set</span><span class="w"> </span>-e
+
+<span class="nv">STREAM_ID</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">1</span><span class="k">:-</span><span class="nv">stream_001</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="nv">RECORDINGS_BASE</span><span class="o">=</span><span class="s2">&quot;/recordings&quot;</span>
+<span class="nv">TEMP_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/temp&quot;</span>
+<span class="nv">FINAL_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/final&quot;</span>
+<span class="nv">WEB_DIR</span><span class="o">=</span><span class="s2">&quot;/var/www/recordings&quot;</span>
+<span class="nv">R2_BUCKET</span><span class="o">=</span><span class="s2">&quot;r2:bucket/recordings&quot;</span>
+<span class="nv">DATE_PATH</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%Y/%m/%d<span class="k">)</span>
+
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEMP_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FINAL_DIR</span><span class="s2">&quot;</span>
+
+<span class="k">for</span><span class="w"> </span>QUALITY<span class="w"> </span><span class="k">in</span><span class="w"> </span>1080p<span class="w"> </span>720p<span class="w"> </span>480p<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nv">TS_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$RECORDINGS_BASE</span><span class="s2">/live_</span><span class="nv">$QUALITY</span><span class="s2">&quot;</span>
+<span class="w">  </span>ls<span class="w"> </span>-1v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TS_DIR</span><span class="s2">&quot;</span>/*.ts<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>f<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;file &#39;</span><span class="nv">$f</span><span class="s2">&#39;&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span><span class="w"> </span>&gt;<span class="w"> </span>list.txt
+
+<span class="w">  </span><span class="c1"># 1. Concat (copy)</span>
+<span class="w">  </span>ffmpeg<span class="w"> </span>-y<span class="w"> </span>-f<span class="w"> </span>concat<span class="w"> </span>-safe<span class="w"> </span><span class="m">0</span><span class="w"> </span>-i<span class="w"> </span>list.txt<span class="w"> </span>-c<span class="w"> </span>copy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEMP_DIR</span><span class="s2">/temp_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+
+<span class="w">  </span><span class="c1"># 2. Disponibilizar para streaming (symlink)</span>
+<span class="w">  </span>ln<span class="w"> </span>-sf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEMP_DIR</span><span class="s2">/temp_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WEB_DIR</span><span class="s2">/</span><span class="si">${</span><span class="nv">STREAM_ID</span><span class="si">}</span><span class="s2">_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+
+<span class="w">  </span><span class="c1"># 3. Encode slow em background</span>
+<span class="w">  </span><span class="o">(</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="nv">$QUALITY</span><span class="w"> </span><span class="k">in</span>
+<span class="w">      </span>1080p<span class="o">)</span><span class="w"> </span><span class="nv">LEVEL</span><span class="o">=</span><span class="s2">&quot;4.1&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">      </span>720p<span class="o">)</span><span class="w">  </span><span class="nv">LEVEL</span><span class="o">=</span><span class="s2">&quot;4.0&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">      </span>480p<span class="o">)</span><span class="w">  </span><span class="nv">LEVEL</span><span class="o">=</span><span class="s2">&quot;3.1&quot;</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span><span class="k">esac</span>
+<span class="w">    </span>ffmpeg<span class="w"> </span>-y<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEMP_DIR</span><span class="s2">/temp_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>-c:v<span class="w"> </span>libx264<span class="w"> </span>-preset<span class="w"> </span>slow<span class="w"> </span>-crf<span class="w"> </span><span class="m">23</span><span class="w"> </span>-profile<span class="w"> </span>high<span class="w"> </span>-level<span class="w"> </span><span class="nv">$LEVEL</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>-c:a<span class="w"> </span>aac<span class="w"> </span>-b:a<span class="w"> </span>128k<span class="w"> </span>-movflags<span class="w"> </span>+faststart<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$FINAL_DIR</span><span class="s2">/final_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+
+<span class="w">    </span>rclone<span class="w"> </span>copy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$FINAL_DIR</span><span class="s2">/final_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$R2_BUCKET</span><span class="s2">/</span><span class="nv">$DATE_PATH</span><span class="s2">/&quot;</span><span class="w"> </span>-v
+<span class="w">    </span><span class="c1"># API: atualizar URL para R2</span>
+<span class="w">    </span>rm<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TEMP_DIR</span><span class="s2">/temp_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$WEB_DIR</span><span class="s2">/</span><span class="si">${</span><span class="nv">STREAM_ID</span><span class="si">}</span><span class="s2">_</span><span class="si">${</span><span class="nv">QUALITY</span><span class="si">}</span><span class="s2">.mp4&quot;</span>
+<span class="w">  </span><span class="o">)</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="k">done</span>
+
+<span class="nb">wait</span>
+</code></pre></div>
+
+<hr />
+<h2>8. Cenários e Recomendações</h2>
+<table>
+<thead>
+<tr>
+<th>Prioridade</th>
+<th>Abordagem</th>
+<th>Motivo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Menor tempo até disponível</td>
+<td>A ou B</td>
+<td>Ambas ~5 min</td>
+</tr>
+<tr>
+<td>Menor tamanho</td>
+<td>B</td>
+<td>Preset slow</td>
+</tr>
+<tr>
+<td>Menor custo total</td>
+<td>A</td>
+<td>Sem egress GCP</td>
+</tr>
+<tr>
+<td>Sem GPU</td>
+<td>B</td>
+<td>libx264</td>
+</tr>
+<tr>
+<td>Poucas views logo após live</td>
+<td>B</td>
+<td>Egress baixo</td>
+</tr>
+<tr>
+<td>Muitas views logo após live</td>
+<td>A</td>
+<td>Evita egress alto</td>
+</tr>
+<tr>
+<td>Implementação mais simples</td>
+<td>B</td>
+<td>Sem watcher</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>9. Alternativas e Híbridos</h2>
+<h3>9.1 Híbrido: A com libx264 preset fast (sem GPU)</h3>
+<ul>
+<li>Comprimir por segmento com preset fast/veryfast</li>
+<li>16 vCPU: ~6–7 s/segmento</li>
+<li>Não acompanha a live (337 × 6,5 s ≈ 37 min)</li>
+<li>Viável apenas se aceitar atraso de ~30 min</li>
+</ul>
+<h3>9.2 Híbrido: B com CDN na frente da VM</h3>
+<ul>
+<li>Colocar Cloudflare na frente da VM para cache</li>
+<li>Reduz egress (cache hit não gera egress)</li>
+<li>Requer domínio e configuração</li>
+</ul>
+<h3>9.3 Abordagem C: Upload copy para R2 temporário</h3>
+<ul>
+<li>Upload copy para R2 (5 min)</li>
+<li>Alunos assistem do R2 (egress grátis)</li>
+<li>Pico de storage no R2 até substituir ~2 h depois</li>
+<li>Custo: pico de storage no R2</li>
+</ul>
+<hr />
+<h2>10. Detalhes Adicionais</h2>
+<h3>10.1 Estrutura de Pastas no R2</h3>
+<div class="codehilite"><pre><span></span><code>bucket/
+└── recordings/
+    └── YYYY/
+        └── MM/
+            └── DD/
+                ├── aula_001_1080p.mp4
+                ├── aula_001_720p.mp4
+                ├── aula_001_480p.mp4
+                ├── aula_002_1080p.mp4
+                └── ...
+</code></pre></div>
+
+<h3>10.2 Configuração Nginx (Abordagem B – Servir Temp)</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">server</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">80</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">recordings.example.com</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">root</span><span class="w"> </span><span class="s">/var/www/recordings</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kn">add_header</span><span class="w"> </span><span class="s">Cache-Control</span><span class="w"> </span><span class="s">&quot;no-cache&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">add_header</span><span class="w"> </span><span class="s">X-Content-Type-Options</span><span class="w"> </span><span class="s">&quot;nosniff&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">add_header</span><span class="w"> </span><span class="s">Access-Control-Allow-Origin</span><span class="w"> </span><span class="s">&quot;*&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="p">~</span><span class="w"> </span><span class="sr">\.mp4$</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kn">add_header</span><span class="w"> </span><span class="s">Accept-Ranges</span><span class="w"> </span><span class="s">bytes</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">add_header</span><span class="w"> </span><span class="s">Cache-Control</span><span class="w"> </span><span class="s">&quot;public,</span><span class="w"> </span><span class="s">max-age=3600&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3>10.3 Sinal de Fim de Live</h3>
+<p><strong>Opção 1: Arquivo marker</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Ao final da live, criar arquivo</span>
+touch<span class="w"> </span>/recordings/live_1080p/END
+<span class="c1"># Script de concat verifica existência de END</span>
+</code></pre></div>
+
+<p><strong>Opção 2: Webhook/API</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># FFmpeg ou NGINX-RTMP chama webhook ao final</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://api.example.com/live/ended<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;stream_id&quot;:&quot;aula_123&quot;}&#39;</span>
+</code></pre></div>
+
+<p><strong>Opção 3: Polling</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Script verifica se não há novos .ts há 30 segundos</span>
+<span class="k">while</span><span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="k">$(</span>find<span class="w"> </span>/recordings<span class="w"> </span>-name<span class="w"> </span><span class="s2">&quot;*.ts&quot;</span><span class="w"> </span>-mmin<span class="w"> </span>-0.5<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l<span class="k">)</span><span class="w"> </span>-eq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="c1"># Live terminou</span>
+<span class="w">    </span><span class="k">break</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span>sleep<span class="w"> </span><span class="m">10</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<h3>10.4 Ordenação de Segmentos</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># HLS típico: seg0.ts, seg1.ts, ... seg336.ts</span>
+<span class="c1"># Ordenação numérica correta:</span>
+ls<span class="w"> </span>-1v<span class="w"> </span>seg*.mp4<span class="w">  </span><span class="c1"># GNU ls</span>
+<span class="c1"># Ou:</span>
+ls<span class="w"> </span>-1<span class="w"> </span>seg*.mp4<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-V
+<span class="c1"># Ou (portável):</span>
+ls<span class="w"> </span>-1<span class="w"> </span>seg*.mp4<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-t<span class="s1">&#39;e&#39;</span><span class="w"> </span>-k2<span class="w"> </span>-n
+</code></pre></div>
+
+<h3>10.5 Configuração rclone para R2</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[r2]</span>
+<span class="na">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">s3</span>
+<span class="na">provider</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">Cloudflare</span>
+<span class="na">access_key_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&lt;R2_ACCESS_KEY&gt;</span>
+<span class="na">secret_access_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&lt;R2_SECRET_KEY&gt;</span>
+<span class="na">endpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">https://&lt;ACCOUNT_ID&gt;.r2.cloudflarestorage.com</span>
+<span class="na">acl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">private</span>
+</code></pre></div>
+
+<hr />
+<h2>11. Monitoramento e Troubleshooting</h2>
+<h3>11.1 Métricas a Monitorar</h3>
+<table>
+<thead>
+<tr>
+<th>Métrica</th>
+<th>Abordagem A</th>
+<th>Abordagem B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Segmentos comprimidos/min</td>
+<td>~7–8</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Tempo de concat</td>
+<td>&lt; 2 min</td>
+<td>&lt; 3 min</td>
+</tr>
+<tr>
+<td>Tempo de upload</td>
+<td>&lt; 5 min</td>
+<td>&lt; 5 min</td>
+</tr>
+<tr>
+<td>Egress GCP</td>
+<td>0</td>
+<td>Por view</td>
+</tr>
+<tr>
+<td>Uso GPU</td>
+<td>60–80%</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Uso CPU</td>
+<td>30–50%</td>
+<td>90–100% durante encode</td>
+</tr>
+</tbody>
+</table>
+<h3>11.2 Problemas Comuns</h3>
+<table>
+<thead>
+<tr>
+<th>Problema</th>
+<th>Causa</th>
+<th>Solução</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Concat falha</td>
+<td>Segmentos fora de ordem</td>
+<td>Ordenar com <code>sort -V</code></td>
+</tr>
+<tr>
+<td>NVENC não encontrado</td>
+<td>GPU não disponível</td>
+<td>Verificar driver, usar T4</td>
+</tr>
+<tr>
+<td>Egress alto (B)</td>
+<td>Muitas views no temp</td>
+<td>Considerar CDN ou abordagem A</td>
+</tr>
+<tr>
+<td>Disco cheio</td>
+<td>Segmentos não apagados</td>
+<td>Limpeza após upload</td>
+</tr>
+</tbody>
+</table>
+<h3>11.3 Checklist de Implementação</h3>
+<p><strong>Abordagem A:</strong>
+- [ ] VM com GPU T4 provisionada
+- [ ] Driver NVIDIA instalado
+- [ ] inotify-tools instalado
+- [ ] Script watcher rodando em systemd/supervisor
+- [ ] Script concat + upload com permissões
+- [ ] rclone configurado para R2
+- [ ] Sinal de fim de live implementado</p>
+<p><strong>Abordagem B:</strong>
+- [ ] VM com 16 vCPU provisionada
+- [ ] Nginx configurado para servir /recordings
+- [ ] Script concat + encode + upload
+- [ ] API para atualizar URL (VM → R2)
+- [ ] rclone configurado para R2
+- [ ] Sinal de fim de live implementado</p>
+<hr />
+<h2>12. Resumo Executivo</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Abordagem A</th>
+<th>Abordagem B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Disponível em</strong></td>
+<td>3–6 min</td>
+<td>~5 min</td>
+</tr>
+<tr>
+<td><strong>Versão final</strong></td>
+<td>3–6 min</td>
+<td>~2 h</td>
+</tr>
+<tr>
+<td><strong>Tamanho</strong></td>
+<td>~5–15% maior</td>
+<td>Menor</td>
+</tr>
+<tr>
+<td><strong>GPU</strong></td>
+<td>Obrigatória</td>
+<td>Não</td>
+</tr>
+<tr>
+<td><strong>Custo base</strong></td>
+<td>~US$ 390/mês</td>
+<td>~US$ 385/mês</td>
+</tr>
+<tr>
+<td><strong>Custo extra</strong></td>
+<td>—</td>
+<td>Egress GCP (variável)</td>
+</tr>
+<tr>
+<td><strong>Recomendação</strong></td>
+<td>Muitas views, sem egress</td>
+<td>Poucas views, máxima compressão</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>Documento gerado para o projeto PosiLive/LiveBridge</em></p>
+</body>
+</html>

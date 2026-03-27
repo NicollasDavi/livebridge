@@ -98,7 +98,12 @@ merge:
   environment:
     RECORDINGS_DIR: /recordings
     COMPRESS_VIDEO: ${COMPRESS_VIDEO:-1}
-    COMPRESS_PRESET: ${COMPRESS_PRESET:-veryfast}
+    COMPRESS_CODEC: ${COMPRESS_CODEC:-h265}
+    COMPRESS_PRESET: ${COMPRESS_PRESET:-veryslow}
+    COMPRESS_CRF: ${COMPRESS_CRF:-28}
+    COMPRESS_CRF_H264: ${COMPRESS_CRF_H264:-23}
+    COMPRESS_CRF_H265: ${COMPRESS_CRF_H265:-28}
+    COMPRESS_AUDIO_BITRATE: ${COMPRESS_AUDIO_BITRATE:-64k}
     ...
   volumes:
     - ./recordings:/recordings
@@ -111,6 +116,7 @@ merge:
 | `build: ./merge` | Constrói a imagem a partir do Dockerfile em `server/merge/`. |
 | `RECORDINGS_DIR: /recordings` | Mesmo caminho que o MediaMTX usa. O Merge lê os `.ts` daqui. |
 | `${COMPRESS_VIDEO:-1}` | Usa variável do `.env`; se não existir, usa `1` (compressão ativada). |
+| `COMPRESS_CODEC` / `PRESET` / `CRF` / `AUDIO` | Padrão: HEVC (`h265`), `veryslow`, CRF 28, AAC 64k — prioridade em menor arquivo (encode lento). |
 | `8082:8080` | Porta 8080 interna, 8082 externa. Evita conflito com outros serviços. |
 
 ### 2.3 Serviço `api`
@@ -257,8 +263,11 @@ const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const R2_VIDEOS_PREFIX = 'recordings/videos/';
 const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
-const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'fast';
-const COMPRESS_CRF = parseInt(process.env.COMPRESS_CRF || '20', 10) || 20;
+const COMPRESS_CODEC = (process.env.COMPRESS_CODEC || 'h265').toLowerCase();
+const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'veryslow';
+const COMPRESS_CRF_H264 = parseInt(process.env.COMPRESS_CRF_H264 || process.env.COMPRESS_CRF || '23', 10) || 23;
+const COMPRESS_CRF_H265 = parseInt(process.env.COMPRESS_CRF_H265 || process.env.COMPRESS_CRF || '28', 10) || 28;
+const COMPRESS_AUDIO_BITRATE = (process.env.COMPRESS_AUDIO_BITRATE || '64k').trim();
 const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 10) || 43200000;
 ```
 
@@ -267,8 +276,10 @@ const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 
 | `RECORDINGS_DIR` | `/recordings` | Raiz das gravações. Deve coincidir com o volume montado. |
 | `R2_VIDEOS_PREFIX` | `recordings/videos/` | Prefixo das chaves no R2. Ex: `recordings/videos/live/matematica/2026-03-10_14-30-00.mp4` |
 | `COMPRESS_VIDEO !== '0'` | true | Qualquer valor exceto `0` ativa compressão. |
-| `COMPRESS_PRESET` | `fast` | `ultrafast`/`veryfast` = mais rápido, arquivo maior. `slow` = menor arquivo, mais lento. |
-| `COMPRESS_CRF` | 20 | 18–23 típico. Menor = melhor qualidade, maior arquivo. |
+| `COMPRESS_CODEC` | `h265` | `h265`/`hevc` = libx265 (menor arquivo). `h264` = libx264 + `-tune animation` (compatibilidade). |
+| `COMPRESS_PRESET` | `veryslow` | Preset x264/x265: mais lento costuma comprimir mais. Para acelerar: `fast` ou `veryfast`. |
+| `COMPRESS_CRF` / `_H264` / `_H265` | 28 (via CRF) | CRF por codec; os específicos sobrescrevem o genérico para aquele codec. HEVC ~26–30; H.264 ~20–24. |
+| `COMPRESS_AUDIO_BITRATE` | `64k` | Bitrate AAC (ex: `64k`, `96k`). |
 | `FFMPEG_TIMEOUT_MS` | 43200000 (12h) | Timeout para vídeos longos (ex: 8h). |
 
 ### 4.2 Cliente S3/R2
@@ -340,24 +351,42 @@ writeFileSync(listPath, listContent);
 
 ### 4.6 Comando ffmpeg
 
+A função `buildCompressFfmpegArgs(listPath, outPath)` monta um array de argumentos passado a `spawn('ffmpeg', ffmpegArgs, …)`.
+
+**Com compressão (HEVC, padrão):** `-c:v libx265`, `-crf` (H265), `-preset`, `-tag:v hvc1` (MP4), `-c:a aac -b:a` (bitrate configurável), `-movflags +faststart`, `-progress pipe:1 -nostats` (progresso).
+
+**Com compressão (H.264):** `COMPRESS_CODEC=h264` → `-c:v libx264`, `-tune animation`, CRF H264, mesmo áudio e `+faststart`.
+
 ```javascript
-const ffmpegCmd = COMPRESS_VIDEO
-  ? `ffmpeg -y -threads 0 -f concat -safe 0 -i "${listPath}" -c:v libx264 -crf ${COMPRESS_CRF} -preset ${COMPRESS_PRESET} -tune animation -c:a aac -b:a 96k -aac_coder twoloop -movflags +faststart "${outPath}"`
-  : `ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`;
+function buildCompressFfmpegArgs(listPath, outPath) {
+  const tail = ['-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
+  const base = ['-y', '-threads', '0', '-f', 'concat', '-safe', '0', '-i', listPath];
+  const audio = ['-c:a', 'aac', '-b:a', COMPRESS_AUDIO_BITRATE, '-aac_coder', 'twoloop'];
+  if (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') {
+    return [...base, '-c:v', 'libx265', '-crf', String(COMPRESS_CRF_H265), '-preset', COMPRESS_PRESET, '-tag:v', 'hvc1', ...audio, ...tail];
+  }
+  return [...base, '-c:v', 'libx264', '-crf', String(COMPRESS_CRF_H264), '-preset', COMPRESS_PRESET, '-tune', 'animation', ...audio, ...tail];
+}
+
+const ffmpegArgs = COMPRESS_VIDEO
+  ? buildCompressFfmpegArgs(listPath, outPath)
+  : ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-progress', 'pipe:1', '-nostats', outPath];
 ```
 
 | Parâmetro | Explicação |
 |-----------|------------|
 | `-y` | Sobrescreve o arquivo de saída sem perguntar. |
-| `-threads 0` | Usa todos os núcleos da CPU. |
+| `-threads 0` | Usa todos os núcleos da CPU (modo compressão). |
 | `-f concat -safe 0` | Modo concat. `-safe 0` permite caminhos absolutos. |
-| `-c:v libx264` | Codifica vídeo em H.264. |
-| `-crf N` | Constante Rate Factor. 18–23 é comum para boa qualidade. |
-| `-preset` | Velocidade vs compressão. `veryfast` acelera o processamento. |
-| `-tune animation` | Otimiza para conteúdo com movimento (aulas, telas). |
-| `-c:a aac -b:a 96k` | Áudio AAC a 96 kbps. |
-| `-movflags +faststart` | Coloca metadados no início do MP4 para começar a reproduzir antes do download completo. |
-| `-c copy` | Sem re-encoding. Usado quando `COMPRESS_VIDEO=0`. |
+| `-c:v libx265` / `libx264` | Vídeo: HEVC (padrão) ou H.264. |
+| `-tag:v hvc1` | Tag para HEVC em MP4 (melhor compatibilidade em players). |
+| `-crf N` | Constante Rate Factor por codec escolhido. |
+| `-preset` | Velocidade vs compressão no encoder escolhido. |
+| `-tune animation` | Só no H.264: conteúdo com movimento (aulas, telas). |
+| `-c:a aac -b:a …` | AAC com bitrate de `COMPRESS_AUDIO_BITRATE`. |
+| `-movflags +faststart` | Metadados no início do MP4 para iniciar reprodução cedo. |
+| `-progress pipe:1 -nostats` | Saída de progresso para o serviço acompanhar o encode. |
+| `-c copy` | Sem re-encoding quando `COMPRESS_VIDEO=0`. |
 
 ### 4.7 Upload multipart para R2
 
@@ -721,8 +750,12 @@ hls = new Hls({
 | Variável | Padrão | Explicação |
 |----------|--------|------------|
 | `COMPRESS_VIDEO` | 1 | 1 = comprime, 0 = só copia (mais rápido, arquivo maior). |
-| `COMPRESS_PRESET` | veryfast | `ultrafast`, `veryfast`, `fast`, `medium`, `slow`. |
-| `COMPRESS_CRF` | 23 | 18–28. Menor = melhor qualidade. |
+| `COMPRESS_CODEC` | h265 | `h265`/`hevc` ou `h264`. |
+| `COMPRESS_PRESET` | veryslow | Preset do encoder; mais lento tende a menor arquivo. |
+| `COMPRESS_CRF` | 28 | Fallback quando `COMPRESS_CRF_H264`/`H265` não estão definidos. |
+| `COMPRESS_CRF_H264` | 23 | CRF específico para H.264. |
+| `COMPRESS_CRF_H265` | 28 | CRF específico para HEVC. |
+| `COMPRESS_AUDIO_BITRATE` | 64k | Bitrate do AAC. |
 | `FFMPEG_TIMEOUT_MS` | 43200000 | 12h em ms. Aumentar para vídeos muito longos. |
 
 ### 8.3 API

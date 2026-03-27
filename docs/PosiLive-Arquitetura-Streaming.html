@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PosiLive - Proposta de Infraestrutura para Streaming</title>
+    <style>
+        @media print { body { margin: 1.5cm; } .no-print { display: none; } }
+        body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 850px; margin: 0 auto; padding: 24px; }
+        h1 { color: #003366; font-size: 26px; border-bottom: 2px solid #003366; padding-bottom: 10px; }
+        h2 { color: #004c99; font-size: 18px; margin-top: 28px; }
+        h3 { color: #0066cc; font-size: 15px; margin-top: 18px; }
+        .subtitle { color: #555; font-size: 15px; margin-bottom: 28px; line-height: 1.5; }
+        table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 13px; }
+        th, td { border: 1px solid #ccc; padding: 10px 14px; text-align: left; }
+        th { background: #e8eef5; font-weight: bold; }
+        .highlight { background: #f0f7ff; padding: 16px; border-left: 4px solid #0066cc; margin: 16px 0; }
+        .glossary { background: #f9f9f9; padding: 12px 16px; margin: 12px 0; font-size: 13px; }
+        .glossary dt { font-weight: bold; color: #004c99; margin-top: 8px; }
+        .glossary dd { margin-left: 0; margin-bottom: 4px; }
+        ul { margin: 10px 0; padding-left: 24px; }
+        li { margin: 6px 0; }
+        .print-btn { background: #003366; color: white; border: none; padding: 12px 24px; cursor: pointer; border-radius: 4px; font-size: 14px; margin-bottom: 24px; }
+        .print-btn:hover { background: #004c99; }
+        .footer { font-size: 11px; color: #888; text-align: center; margin-top: 48px; padding-top: 20px; border-top: 1px solid #ddd; }
+        p { margin: 12px 0; }
+        .scenario { background: #fff9e6; padding: 14px; border-radius: 4px; margin: 14px 0; }
+    </style>
+</head>
+<body>
+    <button class="print-btn no-print" onclick="window.print()">Salvar como PDF</button>
+
+    <h1>PosiLive – Proposta de Infraestrutura para Streaming de Aulas</h1>
+    <p class="subtitle">Documento de planejamento para o sistema de transmissão ao vivo e gravação de aulas, com foco em custo-benefício, qualidade e experiência do aluno.</p>
+
+    <h2>1. Contexto e Objetivo</h2>
+    <p>O PosiLive precisa transmitir aulas ao vivo para cerca de 5.000 alunos, gravar cada aula e disponibilizá-la para assistir depois. As aulas têm em média 45 a 50 minutos. O volume estimado é de aproximadamente 7 terabytes de vídeo por ano.</p>
+    <p>O objetivo desta proposta é definir uma infraestrutura que:</p>
+    <ul>
+        <li>Transmita as aulas ao vivo com boa qualidade e baixa demora</li>
+        <li>Ofereça três opções de qualidade (alta, média e baixa) para se adaptar à internet de cada aluno</li>
+        <li>Deixe a gravação disponível em até 15 minutos após o fim da aula</li>
+        <li>Mantenha os custos mensais em torno de US$ 400 (cerca de R$ 2.100)</li>
+    </ul>
+
+    <h2>2. Glossário – Conceitos em Linguagem Simples</h2>
+    <dl class="glossary">
+        <dt>Live / Transmissão ao vivo</dt>
+        <dd>O professor transmite em tempo real; os alunos assistem no mesmo momento.</dd>
+        <dt>Gravação (VOD)</dt>
+        <dd>O vídeo gravado fica disponível para assistir depois, quantas vezes quiser.</dd>
+        <dt>Resolução (1080p, 720p, 480p)</dt>
+        <dd>Qualidade da imagem. 1080p = Full HD; 720p = HD; 480p = definição padrão. Quanto maior a resolução, melhor a imagem e maior o volume de dados.</dd>
+        <dt>Compressão</dt>
+        <dd>Processo que reduz o tamanho do arquivo de vídeo mantendo a qualidade aceitável. Assim economiza espaço e custo de armazenamento.</dd>
+        <dt>CDN (Rede de Entrega de Conteúdo)</dt>
+        <dd>Rede de servidores espalhados pelo mundo. O vídeo é servido de um servidor próximo ao aluno, tornando mais rápido e estável.</dd>
+        <dt>Egress (Saída de dados)</dt>
+        <dd>O volume de dados que sai do servidor para a internet. Na AWS e no Google, isso é cobrado por gigabyte. Na Cloudflare R2, não há cobrança.</dd>
+        <dt>Latência</dt>
+        <dd>O atraso entre o que acontece na tela do professor e o que o aluno vê. Quanto menor, melhor para interação.</dd>
+    </dl>
+
+    <h2>3. Fluxo do Sistema – O Que Acontece na Prática</h2>
+
+    <h3>3.1 Durante a Live (45–50 minutos)</h3>
+    <p>O professor usa um programa (como OBS) para transmitir a aula. O sinal chega ao servidor na nuvem, que:</p>
+    <ul>
+        <li>Recebe o vídeo em tempo real</li>
+        <li>Gera três versões (alta, média e baixa qualidade)</li>
+        <li>Grava em pequenos pedaços (segmentos) no disco do servidor</li>
+    </ul>
+    <p>Enquanto isso, os alunos assistem pela internet. O sistema escolhe automaticamente a melhor qualidade conforme a conexão de cada um.</p>
+
+    <h3>3.2 Assim Que a Live Termina</h3>
+    <p>O servidor precisa transformar os pedaços gravados em vídeos finais comprimidos e enviá-los para o armazenamento. Há duas formas de fazer isso:</p>
+    
+    <p><strong>Opção A – Processamento em lote:</strong> Quando a live acaba, o servidor junta todos os pedaços e comprime em um único vídeo para cada qualidade. Isso leva cerca de 10 a 13 minutos. É mais simples de implementar.</p>
+    
+    <p><strong>Opção B – Processamento durante a live:</strong> Cada pedaço é comprimido assim que é gravado. No final, basta juntar os pedaços já comprimidos. O vídeo fica pronto em 3 a 5 minutos após o fim da aula. É mais rápido, mas exige mais cuidado na implementação.</p>
+
+    <h3>3.3 Entrega ao Aluno</h3>
+    <p>Os vídeos ficam armazenados na Cloudflare (R2). Quando o aluno clica para assistir, o vídeo é servido pela rede da Cloudflare, que tem pontos de presença em São Paulo e no mundo. Isso torna a reprodução mais rápida e estável.</p>
+
+    <h2>4. Por Que Esta Combinação de Serviços?</h2>
+
+    <h3>4.1 Servidor (Google Cloud – México ou Chile)</h3>
+    <p>O servidor precisa de boa capacidade de processamento para gerar as três qualidades ao vivo e comprimir os vídeos depois. Uma máquina virtual com 8 processadores e uma placa de vídeo (GPU) atende bem.</p>
+    <p>México e Chile são mais baratos que São Paulo e ainda oferecem latência aceitável para o Brasil (cerca de 50 a 130 milissegundos). Para aulas, essa diferença é pouco perceptível.</p>
+
+    <h3>4.2 Armazenamento (Cloudflare R2)</h3>
+    <p>A Cloudflare cobra apenas pelo espaço usado (cerca de US$ 0,015 por GB por mês) e não cobra pela saída de dados (egress). Na AWS e no Google, a saída de dados é cara – com 7 TB por ano, o custo extra seria de centenas de dólares por mês.</p>
+    <p>Com o R2, o custo de armazenamento e entrega fica previsível e bem menor.</p>
+
+    <h3>4.3 CDN (Cloudflare – Plano Gratuito)</h3>
+    <p>O plano gratuito da Cloudflare inclui CDN e banda ilimitada. Ou seja, não há cobrança por quantidade de visualizações ou por dados entregues. Isso reduz muito o custo em comparação com AWS ou Google.</p>
+
+    <h2>5. Custos Detalhados (Estimativa Mensal)</h2>
+    <table>
+        <tr><th>Item</th><th>O que é</th><th>Valor (USD)</th></tr>
+        <tr><td>Servidor (VM + GPU)</td><td>Máquina virtual no Google Cloud (México) com 8 processadores e placa de vídeo para compressão</td><td>~280</td></tr>
+        <tr><td>Disco</td><td>100 GB para gravações temporárias durante a live</td><td>~5</td></tr>
+        <tr><td>Armazenamento R2</td><td>7 TB de vídeos gravados (crescimento anual)</td><td>~105</td></tr>
+        <tr><td>CDN</td><td>Entrega dos vídeos aos alunos</td><td>0</td></tr>
+        <tr><td>Saída de dados (egress)</td><td>Dados que saem para a internet</td><td>0</td></tr>
+        <tr><td><strong>Total</strong></td><td></td><td><strong>~390/mês</strong></td></tr>
+    </table>
+    <p><em>Valores em dólar. O custo em reais varia conforme a cotação. Com dólar a R$ 5,50, o total seria cerca de R$ 2.150/mês.</em></p>
+
+    <h2>6. Comparação com Outras Opções</h2>
+    <p>Se usássemos apenas serviços da AWS ou do Google, na região de São Paulo e com cobrança de saída de dados, o custo seria bem maior:</p>
+    <table>
+        <tr><th>Cenário</th><th>Custo mensal (USD)</th><th>Observação</th></tr>
+        <tr><td>Esta proposta (GCP + R2)</td><td>~390</td><td>Melhor custo-benefício</td></tr>
+        <tr><td>Google completo (SP + armazenamento próprio + egress)</td><td>~1.200+</td><td>Mais caro por causa da saída de dados</td></tr>
+        <tr><td>AWS completo (SP + S3 + egress)</td><td>~1.400+</td><td>Região Brasil e egress encarecem</td></tr>
+    </table>
+    <p class="highlight">A economia estimada é de cerca de <strong>US$ 800 a 1.000 por mês</strong> em relação a uma solução tradicional só com AWS ou Google.</p>
+
+    <h2>7. Economia com Compressão</h2>
+    <p>Sem compressão, um vídeo de 45 minutos em Full HD pode ocupar 4 a 5 GB. Com compressão adequada (H.265), o mesmo vídeo fica em torno de 1 GB – cerca de 80% menor.</p>
+    <table>
+        <tr><th>Formato</th><th>Tamanho (45 min, Full HD)</th><th>Impacto no custo</th></tr>
+        <tr><td>Sem compressão</td><td>~4–5 GB</td><td>7 TB/ano ≈ US$ 105/mês</td></tr>
+        <tr><td>Com compressão H.265</td><td>~1 GB</td><td>~1,4 TB/ano ≈ US$ 25/mês</td></tr>
+    </table>
+    <p>Ou seja, a compressão reduz bastante o custo de armazenamento ao longo do tempo.</p>
+
+    <h2>8. Vantagens desta Proposta</h2>
+    <ul>
+        <li><strong>Sem cobrança de saída de dados</strong> – Na Cloudflare R2, não se paga por gigabyte enviado aos alunos.</li>
+        <li><strong>CDN sem limite</strong> – O plano gratuito da Cloudflare não cobra por visualizações ou banda.</li>
+        <li><strong>Latência aceitável</strong> – México e Chile oferecem boa experiência para o Brasil.</li>
+        <li><strong>Vídeo rápido</strong> – Gravação disponível em 10 a 15 minutos após o fim da aula.</li>
+        <li><strong>Três qualidades</strong> – O aluno assiste na melhor qualidade que sua internet permite.</li>
+        <li><strong>Custo previsível</strong> – Sem surpresas com cobrança de egress.</li>
+    </ul>
+
+    <h2>9. Pontos de Atenção e Riscos</h2>
+    <ul>
+        <li><strong>Latência maior que São Paulo</strong> – No México, o atraso é de cerca de 100 ms. Para aulas, costuma ser aceitável; para videoconferência com muita interação, pode incomodar.</li>
+        <li><strong>Placa de vídeo (GPU)</strong> – Necessária para comprimir em até 15 minutos. É preciso confirmar disponibilidade na região escolhida.</li>
+        <li><strong>Formato H.265</strong> – Oferece melhor compressão, mas alguns navegadores antigos podem não suportar. Há fallback para H.264.</li>
+        <li><strong>Câmbio</strong> – Tudo é cobrado em dólar. O valor em reais varia com a cotação.</li>
+    </ul>
+
+    <h2>10. Alternativa: Armazenamento em NAS</h2>
+    <p>Se preferir armazenar os vídeos em um equipamento próprio (NAS) em vez da nuvem, o custo de armazenamento some da conta mensal. Um NAS com 4 discos de 8 TB (cerca de 21 TB úteis) atende vários anos de gravações.</p>
+    <p>Nesse caso, o servidor na nuvem continuaria fazendo a transmissão ao vivo e a compressão; os vídeos finais seriam enviados para o NAS em vez do R2. O investimento inicial no NAS compensa ao longo do tempo, mas exige manutenção e backup local.</p>
+
+    <h2>11. Linha do Tempo – Um Dia Típico</h2>
+    <div class="scenario">
+        <p><strong>09:00</strong> – Aula 1 começa. O servidor recebe o sinal, gera as três qualidades e grava os segmentos.</p>
+        <p><strong>09:50</strong> – Aula 1 termina. O servidor comprime os vídeos e envia para o R2.</p>
+        <p><strong>10:05</strong> – A gravação da Aula 1 já está disponível para os alunos.</p>
+        <p><strong>10:00</strong> – Aula 2 começa (enquanto a Aula 1 ainda está sendo processada).</p>
+        <p><strong>10:50</strong> – Aula 2 termina. O ciclo se repete.</p>
+    </div>
+
+    <h2>12. Resumo para Decisão</h2>
+    <table>
+        <tr><th>Pergunta</th><th>Resposta</th></tr>
+        <tr><td>O que será feito?</td><td>Transmissão ao vivo + gravação em 3 qualidades + compressão + armazenamento na nuvem</td></tr>
+        <tr><td>Onde roda?</td><td>Servidor no Google Cloud (México ou Chile) + armazenamento e CDN na Cloudflare</td></tr>
+        <tr><td>Quanto custa?</td><td>~US$ 390/mês (cerca de R$ 2.150 com dólar a R$ 5,50)</td></tr>
+        <tr><td>Em quanto tempo a gravação fica disponível?</td><td>10 a 15 minutos após o fim da aula</td></tr>
+        <tr><td>Qual a economia vs. AWS/Google tradicionais?</td><td>~US$ 800 a 1.000/mês</td></tr>
+    </table>
+
+    <p class="footer">Documento de planejamento – Projeto PosiLive / LiveBridge</p>
+
+    <script>
+        // Auto-print em nova janela para PDF (opcional)
+    </script>
+</body>
+</html>

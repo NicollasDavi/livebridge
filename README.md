@@ -6,7 +6,7 @@ Servidor de streaming ao vivo com HLS.
 
 **📋 [Manual de Manutenção](MANUTENCAO.md)** — Guia prático para operação e troubleshooting.
 
-**🔗 [API para Frontend](docs/API_FRONTEND.md)** — Rotas, parâmetros e exemplos para o frontend assistir aulas (ao vivo e gravações).
+**🔗 [Frontend Externo](docs/Frontend-Externo.md)** — Guia completo para integrar o LiveBridge com seu frontend (Angular, React, Vue, etc.).
 
 ## Início rápido
 
@@ -24,9 +24,8 @@ docker compose up -d
 
 ### Assistir
 
-- **Player:** `http://SEU_IP:8081/`
-- **Ao vivo:** digite o nome do stream e clique em **Assistir ao vivo**
-- **Gravações:** aba "Gravações" para listar e assistir transmissões gravadas no R2
+- **API/HLS:** `http://localhost:8081` (ou `http://SEU_IP:8081`)
+- O frontend foi removido. Use seu próprio frontend e integre via `docs/Frontend-Externo.md`
 
 ## Portas
 
@@ -35,7 +34,7 @@ docker compose up -d
 | 1935   | RTMP (OBS)       |
 | 3000   | API (gravações)  |
 | 8082   | Merge (concatena vídeos) |
-| 8081   | Player web       |
+| 8081   | API + HLS (Nginx)|
 | 8888   | HLS              |
 
 ## Firewall (Hostinger VPS)
@@ -45,7 +44,7 @@ Se o OBS der **"conexão expirou"**, libere as portas no **hPanel → VPS → Fi
 | Porta | Protocolo | Uso        |
 |-------|-----------|------------|
 | 1935  | TCP       | RTMP (OBS) |
-| 8081  | TCP       | Player     |
+| 8081  | TCP       | API/HLS    |
 | 8888  | TCP       | HLS        |
 | 3000  | TCP       | API        |
 
@@ -64,23 +63,23 @@ Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
 
 **Se usar 1080p:** bitrate vídeo 6000–8000 kbps.
 
-O merge grava com CRF 18 + AAC 96k — alta qualidade de imagem, áudio limpo e arquivos menores.
+O merge usa **HEVC (H.265)** com preset **veryslow** e CRF ~28, mais **AAC 64k** — prioridade em **menor tamanho de arquivo** (encode mais lento). Ajuste em `.env`: `COMPRESS_CODEC`, `COMPRESS_PRESET`, `COMPRESS_CRF`, `COMPRESS_AUDIO_BITRATE`.
 
 ## Gravação no R2 (Cloudflare)
 
 1. Crie um bucket no R2 e configure `.env` com `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`
 2. Durante a live, o MediaMTX grava segmentos localmente
 3. Ao encerrar a transmissão, o **serviço merge** (após ~2 min sem novos segmentos) concatena tudo em um `.mp4` e envia ao R2
-4. A aba **Gravações** lista e reproduz os vídeos completos
-5. É possível **editar a metadata** das aulas gravadas (número, nome, assunto, professor, matéria, frente, cursos, ativo): clique no ícone de lápis ao lado de cada gravação
+4. O frontend lista e reproduz os vídeos via `GET /api/recordings`
+5. Metadata editável via `PUT /api/recordings/metadata`
 
 **Estrutura no R2:** `recordings/videos/live/NOME_DO_STREAM/YYYY-MM-DD_HH-MM-SS.mp4`
 
 **Nomes customizados:** Os títulos das aulas são salvos em `server/api/data/recordings-names.json` (volume montado no Docker).
 
-**Compressão:** `veryfast` + CRF 23 — equilíbrio entre velocidade e tamanho. Para mais rápido: `COMPRESS_PRESET=ultrafast`. Para menor arquivo: `COMPRESS_CRF=24` ou `COMPRESS_PRESET=fast`. Sem compressão: `COMPRESS_VIDEO=0`. Timeout: `FFMPEG_TIMEOUT_MS=43200000` (12h).
+**Compressão (padrão):** `COMPRESS_CODEC=h265`, `COMPRESS_PRESET=veryslow`, CRF 28, AAC 64k — máxima compactação prática. Encode bem mais lento; para acelerar: `COMPRESS_PRESET=fast` ou `COMPRESS_CODEC=h264`. Players antigos: `COMPRESS_CODEC=h264`. Sem reencode: `COMPRESS_VIDEO=0`. Timeout: `FFMPEG_TIMEOUT_MS=43200000` (12h).
 
-### Gravações não carregam no player?
+### Gravações não carregam no frontend?
 
 **Padrão:** a API faz proxy dos segmentos (sem CORS).
 

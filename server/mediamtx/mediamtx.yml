@@ -1,6 +1,6 @@
 # LiveBridge - MediaMTX config otimizado para menor latência
 
-logLevel: warn
+logLevel: info
 
 # Desabilitar protocolos não usados
 rtsp: false
@@ -24,11 +24,20 @@ hlsSegmentMaxSize: 50M
 hlsDirectory: /hls
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
+# Variantes ABR (_1080/_720/_480): só republicação do transcode-abr.sh — sem gravar de novo.
 paths:
-  "~^live/.+":
+  "~^live/.+_(1080|720|480)$":
+    source: publisher
+    record: no
+  # Nome desta regex deve ordenar *depois* da linha acima no MediaMTX (ordem lexicográfica).
+  # Exige um único segmento após live/ (ex.: live/matematica), sem live/a/b aninhado.
+  "~^live/[^/]+$":
     source: publisher
     record: yes
     recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
     recordFormat: mpegts
     recordSegmentDuration: 60s
     recordDeleteAfter: 0s
+    # Imagem Docker: bluenviron/mediamtx:latest-ffmpeg (script transcode-abr.sh)
+    runOnReady: sh /transcode-abr.sh
+    runOnReadyRestart: yes

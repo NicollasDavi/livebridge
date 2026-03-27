@@ -1,10 +1,12 @@
 services:
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    # *-ffmpeg: inclui ffmpeg para runOnReady (ABR 1080/720/480 — ver mediamtx.yml)
+    image: bluenviron/mediamtx:latest-ffmpeg
     container_name: livebridge-mediamtx
     restart: unless-stopped
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - ./mediamtx/transcode-abr.sh:/transcode-abr.sh:ro
       - ./recordings:/recordings
       - mediamtx-hls:/hls
     ports:
@@ -17,9 +19,17 @@ services:
     restart: unless-stopped
     environment:
       RECORDINGS_DIR: /recordings
+      MERGE_CALLBACK_URL: http://api:3000
       COMPRESS_VIDEO: ${COMPRESS_VIDEO:-1}
-      COMPRESS_PRESET: ${COMPRESS_PRESET:-veryfast}
-      COMPRESS_CRF: ${COMPRESS_CRF:-23}
+      # Máxima compactação: HEVC + preset lento (mais CPU/tempo, menor arquivo)
+      COMPRESS_CODEC: ${COMPRESS_CODEC:-h265}
+      COMPRESS_PRESET: ${COMPRESS_PRESET:-veryslow}
+      COMPRESS_CRF: ${COMPRESS_CRF:-28}
+      COMPRESS_CRF_H264: ${COMPRESS_CRF_H264:-23}
+      COMPRESS_CRF_H265: ${COMPRESS_CRF_H265:-28}
+      COMPRESS_AUDIO_BITRATE: ${COMPRESS_AUDIO_BITRATE:-64k}
+      # Três MP4 no R2 (1080/720/480) + progresso por resolução. single = um session.mp4 (legado)
+      MERGE_RESOLUTIONS: ${MERGE_RESOLUTIONS:-1080,720,480}
       FFMPEG_TIMEOUT_MS: ${FFMPEG_TIMEOUT_MS:-43200000}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
@@ -46,7 +56,14 @@ services:
       R2_BUCKET: ${R2_BUCKET:-livebridge}
       LESSONS_API_URL: ${LESSONS_API_URL:-http://host.docker.internal:8080}
       LESSONS_API_TOKEN: ${LESSONS_API_TOKEN:-}
+      API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:-}
       SKIP_LESSONS_API: ${SKIP_LESSONS_API:-0}
+      RECORDINGS_DIR: /recordings
+      MERGE_INTERNAL_URL: http://merge:8080
+      VIDEOS_API_URL: ${VIDEOS_API_URL:-${LESSONS_API_URL}}
+      VIDEOS_API_TOKEN: ${VIDEOS_API_TOKEN:-${LESSONS_API_TOKEN}}
+    volumes:
+      - ./recordings:/recordings
 
   nginx:
     image: nginx:alpine
@@ -56,8 +73,8 @@ services:
       - api
       - mediamtx
     volumes:
-      - ./player:/usr/share/nginx/html:ro
-      - ./player/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
     ports:
       - "80:80"

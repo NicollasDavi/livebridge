@@ -256,11 +256,14 @@ O arquivo `server/.env` controla o comportamento da aplicação.
 | Variável | O que faz | Padrão |
 |----------|------------|--------|
 | `COMPRESS_VIDEO` | 1 = comprime, 0 = só copia (mais rápido, arquivo maior) | 1 |
-| `COMPRESS_PRESET` | Velocidade: `ultrafast`, `veryfast`, `fast`, `medium`, `slow` | veryfast |
-| `COMPRESS_CRF` | Qualidade (18–28): menor = melhor qualidade, maior arquivo | 23 |
+| `COMPRESS_CODEC` | `h265` (menor arquivo) ou `h264` (compatibilidade) | h265 |
+| `COMPRESS_PRESET` | `veryslow` = máx. compressão (lento); `fast`/`veryfast` = mais rápido | veryslow |
+| `COMPRESS_CRF` | CRF único (fallback); HEVC ~26–30, H.264 ~20–24 | 28 |
+| `COMPRESS_CRF_H264` / `COMPRESS_CRF_H265` | CRF por codec (sobrescreve o genérico por codec) | 23 / 28 |
+| `COMPRESS_AUDIO_BITRATE` | AAC (ex: `64k`, `96k`) | 64k |
 | `FFMPEG_TIMEOUT_MS` | Tempo máximo do merge em ms (43200000 = 12h) | 43200000 |
 
-**Dica:** Para vídeos longos processarem mais rápido, use `COMPRESS_PRESET=ultrafast`. O arquivo fica maior.
+**Dica:** Padrão atual prioriza **menor arquivo** (HEVC + veryslow). Para processar mais rápido: `COMPRESS_PRESET=fast` ou `COMPRESS_CODEC=h264` + `COMPRESS_PRESET=veryfast`.
 
 ### 7.3 API (opcional)
 
