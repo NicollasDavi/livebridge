@@ -1,11 +1,17 @@
 import express from 'express';
-import { spawn, execFileSync } from 'child_process';
+import { spawn, execFile } from 'child_process';
+import { promisify } from 'util';
 import { readdirSync, statSync, writeFileSync, readFileSync, unlinkSync, rmSync, existsSync, mkdirSync, createReadStream } from 'fs';
 import { join } from 'path';
 import { Transform } from 'stream';
 import { ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
-import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { createR2S3Client, R2_VIDEOS_PREFIX } from './lib/r2Client.mjs';
+import { createProgressWriter } from './lib/progressThrottle.js';
+import { createVariantSnapshotter } from './lib/variantSnapshot.js';
+import { runBatchedAll } from './lib/asyncPool.js';
+
+const execFileAsync = promisify(execFile);
 
 const app = express();
 app.use(express.json());
@@ -15,7 +21,6 @@ const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID?.trim();
 const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY?.trim();
 const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
-const R2_VIDEOS_PREFIX = 'recordings/videos/';
 const MERGE_CALLBACK_URL = process.env.MERGE_CALLBACK_URL || '';
 const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
 /** h265 = menor arquivo (HEVC). h264 = compatibilidade máxima com players antigos */
@@ -28,6 +33,9 @@ const COMPRESS_AUDIO_BITRATE = (process.env.COMPRESS_AUDIO_BITRATE || '64k').tri
 const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 10) || 43200000;
 /** single = um MP4 session.mp4 (legado). Padrão: 1080,720,480 → três MP4 no R2 */
 const MERGE_RESOLUTIONS_RAW = (process.env.MERGE_RESOLUTIONS || '1080,720,480').trim().toLowerCase();
+/** Paralelismo de encodes ffmpeg (1 = sequencial). Recomendado 2 em VPS com CPU suficiente. */
+const MERGE_ENCODE_CONCURRENCY = Math.max(1, Math.min(4, parseInt(process.env.MERGE_ENCODE_CONCURRENCY || '1', 10) || 1));
+const MERGE_PROGRESS_THROTTLE_MS = Math.max(50, parseInt(process.env.MERGE_PROGRESS_THROTTLE_MS || '400', 10) || 400);
 
 function parseMergeHeights() {
   if (MERGE_RESOLUTIONS_RAW === 'single' || MERGE_RESOLUTIONS_RAW === '0' || MERGE_RESOLUTIONS_RAW === 'false') {
@@ -38,46 +46,28 @@ function parseMergeHeights() {
 }
 
 const hasR2 = !!(R2_ACCOUNT_ID && R2_ACCESS_KEY && R2_SECRET_KEY);
-const s3 = hasR2 ? new S3Client({
-  region: 'auto',
-  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY }
-}) : null;
+const s3 = createR2S3Client({
+  accountId: R2_ACCOUNT_ID,
+  accessKey: R2_ACCESS_KEY,
+  secretKey: R2_SECRET_KEY
+});
 
 const BOUNDARIES_DIR = join(RECORDINGS_DIR, 'boundaries');
-const PROGRESS_DIR = join(RECORDINGS_DIR, 'merge-progress');
 
-function progressFilePath(path, sessionName) {
-  const safe = `${path.replace(/\//g, '_')}__${String(sessionName).replace(/[/\\]/g, '_')}`;
-  return join(PROGRESS_DIR, `${safe}.json`);
-}
+const { writeProgress, clearProgress, progressFilePath } = createProgressWriter({
+  recordingsDir: RECORDINGS_DIR,
+  throttleMs: MERGE_PROGRESS_THROTTLE_MS
+});
 
-function writeProgress(path, sessionName, data) {
+async function probeConcatDurationSec(listPath) {
   try {
-    if (!existsSync(PROGRESS_DIR)) mkdirSync(PROGRESS_DIR, { recursive: true });
-    const payload = { path, session: sessionName, ...data, updatedAt: new Date().toISOString() };
-    writeFileSync(progressFilePath(path, sessionName), JSON.stringify(payload));
-  } catch (e) {
-    console.warn('[merge] progress write:', e?.message);
-  }
-}
-
-function clearProgress(path, sessionName) {
-  try {
-    const fp = progressFilePath(path, sessionName);
-    if (existsSync(fp)) unlinkSync(fp);
-  } catch (_) {}
-}
-
-function probeConcatDurationSec(listPath) {
-  try {
-    const out = execFileSync('ffprobe', [
+    const { stdout } = await execFileAsync('ffprobe', [
       '-v', 'error',
       '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1',
       '-f', 'concat', '-safe', '0', '-i', listPath
     ], { encoding: 'utf8', timeout: 120000, maxBuffer: 1024 * 1024 });
-    const v = parseFloat(String(out).trim());
+    const v = parseFloat(String(stdout).trim());
     return Number.isFinite(v) && v > 0 ? v : null;
   } catch {
     return null;
@@ -179,15 +169,14 @@ function computeOverallMulti(variants, globalPhase) {
 async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listPath, durationSec, isAula, deleteFolderAfter, heights) {
   const videoCodecLabel = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') ? 'hevc' : 'h264';
   const variants = makeVariantStates(heights);
+  const snapVariants = createVariantSnapshotter();
   const n = heights.length;
   const variantPayload = [];
 
-  for (let j = 0; j < n; j++) {
+  async function encodeVariant(j) {
     const h = heights[j];
     const label = variantLabel(h);
     const outPath = join(sessionDir, `${sessionName}_${h}.mp4`);
-    const r2Key = `${R2_VIDEOS_PREFIX}${path}/${sessionName}_${h}.mp4`;
-
     variants[j].phase = 'encoding';
     variants[j].durationSec = durationSec;
     writeProgress(path, sessionName, {
@@ -197,7 +186,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
       phase: 'encoding',
       currentVariant: { height: h, label, index: j + 1, total: n },
       currentResolution: { height: h, label, index: j + 1, total: n },
-      variants: JSON.parse(JSON.stringify(variants)),
+      variants: snapVariants(variants, true),
       percentOverall: computeOverallMulti(variants, 'encoding'),
       encodingPercent: 0,
       uploadPercent: 0,
@@ -208,7 +197,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
       bytesUploaded: 0,
       bytesTotal: null,
       message: `Convertendo ${label} (${j + 1}/${n}) — ${videoCodecLabel.toUpperCase()}…`
-    });
+    }, { immediate: true });
 
     const ffmpegArgs = buildCompressFfmpegArgs(listPath, outPath, { targetHeight: h });
     const encStart = Date.now();
@@ -224,7 +213,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
           phase: 'encoding',
           currentVariant: { height: h, label, index: j + 1, total: n },
           currentResolution: { height: h, label, index: j + 1, total: n },
-          variants: JSON.parse(JSON.stringify(variants)),
+          variants: snapVariants(variants, false),
           percentOverall: computeOverallMulti(variants, 'encoding'),
           encodingPercent: tick.encodingPercent,
           uploadPercent: 0,
@@ -246,26 +235,66 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
         videoCodec: videoCodecLabel,
         phase: 'failed',
         currentVariant: { height: h, label, index: j + 1, total: n },
-        variants: JSON.parse(JSON.stringify(variants)),
+        variants: snapVariants(variants, true),
         percentOverall: computeOverallMulti(variants, 'failed'),
         message: `${label}: ${e?.message || 'ffmpeg_failed'}`,
         encodingPercent: variants[j].encodingPercent || 0,
         uploadPercent: 0
-      });
+      }, { immediate: true });
       try { unlinkSync(listPath); } catch (_) {}
-      return { ok: false, reason: 'ffmpeg_failed', path, session: sessionName, failedVariant: label };
+      const err = new Error('ffmpeg_failed');
+      err.mergeFail = true;
+      err.failedVariant = label;
+      err.reason = 'ffmpeg_failed';
+      throw err;
     }
 
     variants[j].encodingPercent = 100;
     variants[j].currentTimeSec = null;
     variants[j].etaSecondsEncoding = 0;
+    return { j, h, label, outPath, r2Key: `${R2_VIDEOS_PREFIX}${path}/${sessionName}_${h}.mp4` };
+  }
 
-    if (!hasR2) {
+  const indices = heights.map((_, j) => j);
+  try {
+    await runBatchedAll(indices, MERGE_ENCODE_CONCURRENCY, (j) => encodeVariant(j));
+  } catch (e) {
+    if (e.mergeFail) {
+      return { ok: false, reason: e.reason || 'ffmpeg_failed', path, session: sessionName, failedVariant: e.failedVariant };
+    }
+    throw e;
+  }
+
+  if (!hasR2) {
+    for (let j = 0; j < n; j++) {
+      const h = heights[j];
+      const label = variantLabel(h);
       variantPayload.push({ height: h, label, id: label, key: null });
       variants[j].phase = 'done';
       variants[j].uploadPercent = 100;
-      continue;
     }
+    try { unlinkSync(listPath); } catch (_) {}
+    writeProgress(path, sessionName, {
+      schemaVersion: 2,
+      mergeMode: 'multi',
+      videoCodec: videoCodecLabel,
+      phase: 'done',
+      percentOverall: 100,
+      currentVariant: null,
+      variants: snapVariants(variants, true),
+      message: 'Concluído (sem R2)',
+      encodingPercent: 100,
+      uploadPercent: 100
+    }, { immediate: true });
+    setTimeout(() => clearProgress(path, sessionName), 60000);
+    return { ok: true, path, session: sessionName, keys: [], variants: variantPayload };
+  }
+
+  for (let j = 0; j < n; j++) {
+    const h = heights[j];
+    const label = variantLabel(h);
+    const outPath = join(sessionDir, `${sessionName}_${h}.mp4`);
+    const r2Key = `${R2_VIDEOS_PREFIX}${path}/${sessionName}_${h}.mp4`;
 
     let fileSize;
     try {
@@ -303,7 +332,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
             phase: 'uploading',
             currentVariant: { height: h, label, index: j + 1, total: n },
             currentResolution: { height: h, label, index: j + 1, total: n },
-            variants: JSON.parse(JSON.stringify(variants)),
+            variants: snapVariants(variants, false),
             percentOverall: computeOverallMulti(variants, 'uploading'),
             encodingPercent: 100,
             uploadPercent: upPct,
@@ -348,10 +377,10 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
             mergeMode: 'multi',
             videoCodec: videoCodecLabel,
             phase: 'failed',
-            variants: JSON.parse(JSON.stringify(variants)),
+            variants: snapVariants(variants, true),
             message: `Upload ${label} falhou: ${e?.message}`,
             percentOverall: computeOverallMulti(variants, 'failed')
-          });
+          }, { immediate: true });
           try { unlinkSync(listPath); } catch (_) {}
           return { ok: false, reason: 'upload_failed', path, session: sessionName, failedVariant: label };
         }
@@ -362,23 +391,6 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
   }
 
   try { unlinkSync(listPath); } catch (_) {}
-
-  if (!hasR2) {
-    writeProgress(path, sessionName, {
-      schemaVersion: 2,
-      mergeMode: 'multi',
-      videoCodec: videoCodecLabel,
-      phase: 'done',
-      percentOverall: 100,
-      currentVariant: null,
-      variants: JSON.parse(JSON.stringify(variants)),
-      message: 'Concluído (sem R2)',
-      encodingPercent: 100,
-      uploadPercent: 100
-    });
-    setTimeout(() => clearProgress(path, sessionName), 60000);
-    return { ok: true, path, session: sessionName, keys: [], variants: variantPayload };
-  }
 
   for (const f of tsFiles) {
     try { unlinkSync(join(sessionDir, f)); } catch (_) {}
@@ -398,11 +410,11 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
     phase: 'done',
     percentOverall: 100,
     currentVariant: null,
-    variants: JSON.parse(JSON.stringify(variants)),
+    variants: snapVariants(variants, true),
     message: 'Concluído',
     encodingPercent: 100,
     uploadPercent: 100
-  });
+  }, { immediate: true });
   setTimeout(() => clearProgress(path, sessionName), 300000);
   const primaryKey = variantPayload[0]?.key;
   return {
@@ -508,7 +520,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
   const listContent = tsFiles.map(f => `file '${join(sessionDir, f)}'`).join('\n');
   writeFileSync(listPath, listContent);
 
-  const durationSec = probeConcatDurationSec(listPath);
+  const durationSec = await probeConcatDurationSec(listPath);
   let heights = parseMergeHeights();
   if (heights && !COMPRESS_VIDEO) {
     console.warn('[merge] Multi-resolução (MERGE_RESOLUTIONS) exige COMPRESS_VIDEO=1; gerando um arquivo (copy).');
@@ -543,7 +555,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     bytesUploaded: 0,
     bytesTotal: null,
     message: 'Compactando vídeo…'
-  });
+  }, { immediate: true });
 
   const ffmpegArgs = COMPRESS_VIDEO
     ? buildCompressFfmpegArgs(listPath, outPath, {})
@@ -614,14 +626,14 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       message: e?.message || 'ffmpeg_failed',
       encodingPercent: 0,
       uploadPercent: 0
-    });
+    }, { immediate: true });
     return { ok: false, reason: 'ffmpeg_failed' };
   }
   try { unlinkSync(listPath); } catch (_) {}
 
   if (!hasR2) {
     console.log('[merge] R2 não configurado, mp4 gerado em', outPath);
-    writeProgress(path, sessionName, { ...singlePb(), phase: 'done', percentOverall: 100, message: 'Concluído (sem R2)' });
+    writeProgress(path, sessionName, { ...singlePb(), phase: 'done', percentOverall: 100, message: 'Concluído (sem R2)' }, { immediate: true });
     setTimeout(() => clearProgress(path, sessionName), 60000);
     return { ok: true, local: outPath };
   }
@@ -681,7 +693,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
         bytesUploaded: 0,
         bytesTotal: fileSize,
         message: 'Enviando para o armazenamento…'
-      });
+      }, { immediate: true });
       const upload = new Upload({
         client: s3,
         params: {
@@ -721,7 +733,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
         bytesUploaded: fileSize,
         bytesTotal: fileSize,
         message: 'Concluído'
-      });
+      }, { immediate: true });
       setTimeout(() => clearProgress(path, sessionName), 300000);
       const vOne = { height: null, label: 'single', id: 'single', key: r2Key };
       return { ok: true, key: r2Key, keys: [r2Key], path, session: sessionName, variants: [vOne] };
@@ -735,7 +747,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
         message: `Upload falhou (tentativa ${attempt}): ${e?.message || e}`,
         encodingPercent: 100,
         uploadPercent: 0
-      });
+      }, { immediate: true });
       if (attempt < MAX_RETRIES) {
         const delay = attempt * 5000;
         console.log(`[merge] Aguardando ${delay / 1000}s antes de tentar novamente...`);
@@ -750,7 +762,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     message: lastError?.message || 'upload_failed',
     encodingPercent: 100,
     uploadPercent: 0
-  });
+  }, { immediate: true });
   return { ok: false, reason: 'upload_failed' };
 }
 
@@ -1009,7 +1021,10 @@ app.listen(PORT, () => {
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
   const mh = parseMergeHeights();
   if (mh) {
-    console.log(`[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (MERGE_RESOLUTIONS). Um encode + upload por resolução.`);
+    const encNote = MERGE_ENCODE_CONCURRENCY > 1
+      ? ` Até ${MERGE_ENCODE_CONCURRENCY} encodes em paralelo (MERGE_ENCODE_CONCURRENCY).`
+      : '';
+    console.log(`[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (MERGE_RESOLUTIONS).${encNote}`);
   } else {
     console.log('[merge] Saída única: session.mp4 (MERGE_RESOLUTIONS=single)');
   }

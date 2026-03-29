@@ -6,7 +6,9 @@
 GET http://localhost:8081/api/recordings
 ```
 
-Retorna os vídeos `.mp4` que **já estão no R2**.
+Retorna os vídeos `.mp4` que **já estão no R2** (corpo: **array** JSON, como antes).
+
+Listagem **paginada** (buckets grandes): `GET .../api/recordings?paginate=1&maxKeys=500&cursor=...` — resposta em **objeto** com `items` e `nextCursor`. Ver [API-Integracao-Performance-e-Paginacao.md](API-Integracao-Performance-e-Paginacao.md).
 
 **Antes:** `GET http://localhost:8081/api/init` (define cookie).
 

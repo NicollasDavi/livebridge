@@ -2,6 +2,8 @@
 
 Documentação completa das rotas do LiveBridge, da API Java e do fluxo de integração.
 
+**Atualizações de performance e paginação:** [API-Integracao-Performance-e-Paginacao.md](API-Integracao-Performance-e-Paginacao.md)
+
 ---
 
 ## Índice

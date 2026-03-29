@@ -98,18 +98,26 @@ await fetch('http://localhost:8081/api/init-live', {
 
 ## 4. `GET /api/recordings`
 
-**Descrição:** Lista todos os vídeos `.mp4` que estão no bucket R2, com metadata da API Lessons (nome, professor, matéria, etc.) quando disponível.
+**Descrição:** Lista os vídeos `.mp4` no bucket R2, com metadata da API Lessons (nome, professor, matéria, etc.) quando disponível.
 
 **Quando usar:** Para exibir a lista de gravações disponíveis para assistir.
+
+**Modo lista completa (comportamento clássico):** corpo da resposta é um **array JSON** — igual ao histórico do projeto.
 
 **Request:**
 ```
 GET http://localhost:8081/api/recordings
 ```
 
+**Modo paginado (opcional, buckets muito grandes):** uma página por pedido `ListObjects` no R2; ver **[API — Performance, logs e paginação](API-Integracao-Performance-e-Paginacao.md)**.
+
+```
+GET http://localhost:8081/api/recordings?paginate=1&maxKeys=500&cursor={opcional}
+```
+
 **Antes:** Chamar `GET /api/init` para definir o cookie.
 
-**Response 200:**
+**Response 200 (modo clássico):**
 ```json
 [
   {
@@ -129,11 +137,13 @@ GET http://localhost:8081/api/recordings
 ]
 ```
 
+**Response 200 (modo `paginate=1`):** objeto com `items`, `nextCursor`, `maxKeys`, `paginated`, `note` — **não** é um array na raiz; o cliente deve concatenar páginas usando `nextCursor`.
+
 **Uso:**
 ```javascript
 await fetch('http://localhost:8081/api/init', { credentials: 'include' });
 const res = await fetch('http://localhost:8081/api/recordings', { credentials: 'include' });
-const videos = await res.json();
+const videos = await res.json(); // array no modo clássico
 ```
 
 **Erros:** 503 (R2 não configurado)
