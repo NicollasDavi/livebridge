@@ -16,9 +16,11 @@ services:
       - ./mediamtx/transcode-abr.sh:/transcode-abr.sh:ro
       - ./recordings:/recordings
       - mediamtx-hls:/hls
+    # RTMP no host:80 → MediaMTX:1935 (firewall só 80/443). OBS: rtmp://IP:80/live/NOME
+    # Nota: o host 80 não é HTTP nginx; usar só https://IP/ para o site. Certbot HTTP-01 exige DNS-01 ou pausa RTMP.
     ports:
-      - "1935:1935"   # RTMP (OBS)
-      # 8888 não exposto — HLS só via nginx (porta 8081) com auth
+      - "80:1935"
+      # 8888 não exposto — HLS só via nginx com auth
 
   merge:
     build: ./merge
@@ -51,8 +53,9 @@ services:
       R2_BUCKET: ${R2_BUCKET:-livebridge}
     volumes:
       - ./recordings:/recordings
+    # Só localhost — a API chama merge na rede Docker; não precisa de porta pública.
     ports:
-      - "8082:8080"
+      - "127.0.0.1:8082:8080"
 
   api:
     build: ./api
@@ -120,9 +123,9 @@ services:
       - ./certs:/etc/nginx/certs:ro
       - nginx-hls-cache:/var/cache/nginx/hls
     ports:
-      - "80:80"
       - "443:443"
-      - "8081:8080"
+      # HTTP interno só no localhost (evita expor 8081 na internet)
+      - "127.0.0.1:8081:8080"
 
 volumes:
   mediamtx-hls:

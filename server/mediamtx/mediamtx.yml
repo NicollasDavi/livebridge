@@ -47,7 +47,7 @@ hlsSegmentDuration: 10s
 hlsSegmentMaxSize: 50M
 hlsDirectory: /hls
 
-# Path para rtmp://IP:1935/live/QUALQUERNOME
+# Path para rtmp://IP:80/live/QUALQUERNOME (compose mapeia host:80 → :1935) ou rtmp://IP:1935 em dev local
 # Variantes ABR: transcode-abr.sh. record: no aqui — gravar 3× em paralelo no mesmo fluxo que já faz HLS + x264
 # causava [recorder] detected drift em loop, I/O e CPU a mais → "reader is too slow", Broken pipe e 404 no HLS.
 # Gravação para merge/lesson-boundary fica só no ingest em live/<stream> (abaixo); o merge gera 1080/720/480 por encode.
