@@ -35,8 +35,8 @@ services:
       GF_SERVER_ROOT_URL: '%(protocol)s://%(domain)s:%(http_port)s/'
     volumes:
       - grafana-data:/var/lib/grafana
+      # Tudo o provisionamento (datasources + dashboards JSON em provisioning/dashboards/dashs)
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
     ports:
       - '3001:3000'
 
