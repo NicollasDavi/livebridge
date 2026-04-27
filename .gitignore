@@ -15,6 +15,10 @@ node_modules/
 # Docker
 .env.local
 
+# Variáveis locais e chaves (OpenAI, R2, etc.): nunca comitar. Manter os `.env.example` no repo.
+**/.env
+!**/.env.example
+
 # OS
 .DS_Store
 Thumbs.db

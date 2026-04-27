@@ -31,6 +31,49 @@ export function mapContentsToRecordings(contents) {
   return list;
 }
 
+/**
+ * Uma aula multiresolução no R2 = 3 objetos (*_1080/_720/_480.mp4) com o mesmo id lógico.
+ * Colapsa num único item (como um único registo "Aula acabou"), não três gravações separadas.
+ */
+export function collapseMultiresRecordingRows(list) {
+  const m = new Map();
+  for (const rec of list) {
+    const id = rec.id;
+    let agg = m.get(id);
+    if (!agg) {
+      agg = {
+        path: rec.path,
+        session: rec.session,
+        date: rec.date,
+        id: rec.id,
+        key: rec.key,
+        variant: null
+      };
+      m.set(id, agg);
+    }
+    if (rec.variant) {
+      if (!agg.variants) agg.variants = [];
+      agg.variants.push({ variant: rec.variant, key: rec.key });
+    } else {
+      agg.key = rec.key;
+      agg._legacySingleFile = true;
+    }
+  }
+  const out = [];
+  for (const agg of m.values()) {
+    if (agg.variants && agg.variants.length > 0) {
+      agg.variants.sort(
+        (a, b) => (variantOrder[a.variant] ?? 99) - (variantOrder[b.variant] ?? 99)
+      );
+      agg.key = agg.variants[0].key;
+      agg.variant = null;
+    }
+    delete agg._legacySingleFile;
+    out.push(agg);
+  }
+  return out;
+}
+
 export function sortRecordingsList(list) {
   list.sort((a, b) => {
     const c = b.session.localeCompare(a.session);

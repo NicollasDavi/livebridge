@@ -1,14 +1,18 @@
 import express from 'express';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import * as cfg from './config.js';
+import { registerHealthRoutes } from './routes/health.js';
 import { registerLiveRoutes } from './routes/live.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
+import { setupPrometheusMetrics } from './middleware/metricsHttp.js';
 import { hasR2 } from './r2.js';
 
 export function createApp() {
   const app = express();
+  app.use(compression({ threshold: 1024 }));
   app.use(
     cors({
       origin: (origin, callback) => {
@@ -28,9 +32,15 @@ export function createApp() {
   app.use(cookieParser());
   app.use(express.json());
 
+  registerHealthRoutes(app);
+  setupPrometheusMetrics(app);
+
   app.use((req, res, next) => {
     const path = req.path || '';
     const noisy =
+      path === '/api/health' ||
+      path === '/api/ready' ||
+      path === '/metrics' ||
       path === '/api/check-video-access' ||
       path.startsWith('/api/recordings/hls/segment');
     if (!noisy || cfg.API_LOG_ALL_REQUESTS) {

@@ -1,8 +1,20 @@
 import express from 'express';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
-import { readdirSync, statSync, writeFileSync, readFileSync, unlinkSync, rmSync, existsSync, mkdirSync, createReadStream } from 'fs';
+import {
+  readdirSync,
+  statSync,
+  writeFileSync,
+  readFileSync,
+  unlinkSync,
+  rmSync,
+  existsSync,
+  mkdirSync,
+  createReadStream,
+  renameSync
+} from 'fs';
 import { join } from 'path';
+import { randomBytes } from 'crypto';
 import { Transform } from 'stream';
 import { ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
@@ -33,9 +45,15 @@ const COMPRESS_AUDIO_BITRATE = (process.env.COMPRESS_AUDIO_BITRATE || '64k').tri
 const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 10) || 43200000;
 /** single = um MP4 session.mp4 (legado). Padrão: 1080,720,480 → três MP4 no R2 */
 const MERGE_RESOLUTIONS_RAW = (process.env.MERGE_RESOLUTIONS || '1080,720,480').trim().toLowerCase();
-/** Paralelismo de encodes ffmpeg (1 = sequencial). Recomendado 2 em VPS com CPU suficiente. */
+/** Paralelismo de encodes (multi-resolução). 1 = sequencial. */
 const MERGE_ENCODE_CONCURRENCY = Math.max(1, Math.min(4, parseInt(process.env.MERGE_ENCODE_CONCURRENCY || '1', 10) || 1));
 const MERGE_PROGRESS_THROTTLE_MS = Math.max(50, parseInt(process.env.MERGE_PROGRESS_THROTTLE_MS || '400', 10) || 400);
+/** 0 = só loga resumo do scan quando stream/sessões mudam; >0 = heartbeat a cada N ms (mesmo sem mudança) */
+const MERGE_SCAN_SUMMARY_INTERVAL_MS = Math.max(
+  0,
+  parseInt(process.env.MERGE_SCAN_SUMMARY_INTERVAL_MS || '0', 10) || 0
+);
+const MERGE_SCAN_SUMMARY = process.env.MERGE_SCAN_SUMMARY !== '0';
 
 function parseMergeHeights() {
   if (MERGE_RESOLUTIONS_RAW === 'single' || MERGE_RESOLUTIONS_RAW === '0' || MERGE_RESOLUTIONS_RAW === 'false') {
@@ -53,6 +71,21 @@ const s3 = createR2S3Client({
 });
 
 const BOUNDARIES_DIR = join(RECORDINGS_DIR, 'boundaries');
+
+/** Gravações ABR do MediaMTX em live/<stream>_1080|_720|_480 — não são aulas próprias; merge/upload só em live/<stream> e pastas *_aula. */
+function isMediamtxAbrVariantDir(name) {
+  return typeof name === 'string' && /_(1080|720|480)$/i.test(name);
+}
+
+/** Pasta temporária por job — vários merges em paralelo na mesma `live/<stream>` não partilham concat nem .mp4. */
+function removeMergeWorkDir(workDir) {
+  if (!workDir) return;
+  try {
+    rmSync(workDir, { recursive: true, force: true });
+  } catch (e) {
+    console.warn('[merge] Falha ao remover workDir:', workDir, e?.message);
+  }
+}
 
 const { writeProgress, clearProgress, progressFilePath } = createProgressWriter({
   recordingsDir: RECORDINGS_DIR,
@@ -84,6 +117,32 @@ function deleteAulaSourceTs(path, tsFiles) {
   }
 }
 
+/** Remove a pasta da sessão após upload; evita pasta vazia se rmSync falhar ou sobrar ficheiros. */
+function removeSessionDirAfterMerge(sessionDir, deleteFolderAfter) {
+  if (!deleteFolderAfter || !sessionDir) return;
+  try {
+    if (!existsSync(sessionDir)) return;
+    rmSync(sessionDir, { recursive: true, force: true });
+  } catch (e) {
+    console.warn('[merge] Falha ao remover pasta da sessão (1ª tentativa):', sessionDir, e?.message);
+    try {
+      if (!existsSync(sessionDir)) return;
+      for (const name of readdirSync(sessionDir)) {
+        try {
+          rmSync(join(sessionDir, name), { recursive: true, force: true });
+        } catch (e2) {
+          console.warn('[merge] Item residual na pasta sessão:', join(sessionDir, name), e2?.message);
+        }
+      }
+      if (existsSync(sessionDir)) {
+        rmSync(sessionDir, { recursive: true, force: true });
+      }
+    } catch (e3) {
+      console.warn('[merge] Falha ao remover pasta da sessão (2ª tentativa):', sessionDir, e3?.message);
+    }
+  }
+}
+
 function clearBoundariesForStream(path) {
   const streamName = path.replace(/^live\//, '');
   try {
@@ -99,7 +158,11 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
   const tail = ['-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
   const base = ['-y', '-threads', '0', '-f', 'concat', '-safe', '0', '-i', listPath];
   if (targetHeight != null && Number.isFinite(targetHeight)) {
-    base.push('-vf', `scale=-2:${targetHeight}:force_original_aspect_ratio=decrease`);
+    // 16:9 @ 480px altura → 854×480; scale=-2:480 pode dar 853 (ímpar). 4:2:0 exige pares → force_divisible_by=2
+    base.push(
+      '-vf',
+      `scale=-2:${targetHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`
+    );
   }
   const audio = ['-c:a', 'aac', '-b:a', COMPRESS_AUDIO_BITRATE, '-aac_coder', 'twoloop'];
 
@@ -119,6 +182,29 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
     '-c:v', 'libx264',
     '-crf', String(COMPRESS_CRF_H264),
     '-preset', COMPRESS_PRESET,
+    '-tune', 'animation',
+    ...audio,
+    ...tail
+  ];
+}
+
+/** Segunda tentativa (H.264 + preset médio) se o HEVC falhar — mantém a mesma altura (ex. 480p obrigatório). */
+function buildFallbackH264Args(listPath, outPath, opts = {}) {
+  const targetHeight = opts.targetHeight;
+  const tail = ['-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
+  const base = ['-y', '-threads', '0', '-f', 'concat', '-safe', '0', '-i', listPath];
+  if (targetHeight != null && Number.isFinite(targetHeight)) {
+    base.push(
+      '-vf',
+      `scale=-2:${targetHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`
+    );
+  }
+  const audio = ['-c:a', 'aac', '-b:a', COMPRESS_AUDIO_BITRATE, '-aac_coder', 'twoloop'];
+  return [
+    ...base,
+    '-c:v', 'libx264',
+    '-crf', String(Math.min(COMPRESS_CRF_H264 + 2, 28)),
+    '-preset', 'medium',
     '-tune', 'animation',
     ...audio,
     ...tail
@@ -166,7 +252,18 @@ function computeOverallMulti(variants, globalPhase) {
   return Math.min(99, Math.round(sum));
 }
 
-async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listPath, durationSec, isAula, deleteFolderAfter, heights) {
+async function mergeAndUploadMulti(
+  path,
+  sessionName,
+  sessionDir,
+  tsFiles,
+  listPath,
+  durationSec,
+  isAula,
+  deleteFolderAfter,
+  heights,
+  workDir
+) {
   const videoCodecLabel = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') ? 'hevc' : 'h264';
   const variants = makeVariantStates(heights);
   const snapVariants = createVariantSnapshotter();
@@ -176,7 +273,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
   async function encodeVariant(j) {
     const h = heights[j];
     const label = variantLabel(h);
-    const outPath = join(sessionDir, `${sessionName}_${h}.mp4`);
+    const outPath = join(workDir, `${sessionName}_${h}.mp4`);
     variants[j].phase = 'encoding';
     variants[j].durationSec = durationSec;
     writeProgress(path, sessionName, {
@@ -201,52 +298,73 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
 
     const ffmpegArgs = buildCompressFfmpegArgs(listPath, outPath, { targetHeight: h });
     const encStart = Date.now();
-    try {
-      await runFfmpegWithProgress(ffmpegArgs, durationSec, encStart, (tick) => {
-        variants[j].encodingPercent = tick.encodingPercent;
-        variants[j].currentTimeSec = tick.currentTimeSec;
-        variants[j].etaSecondsEncoding = tick.etaSecondsEncoding;
-        writeProgress(path, sessionName, {
-          schemaVersion: 2,
-          mergeMode: 'multi',
-          videoCodec: videoCodecLabel,
-          phase: 'encoding',
-          currentVariant: { height: h, label, index: j + 1, total: n },
-          currentResolution: { height: h, label, index: j + 1, total: n },
-          variants: snapVariants(variants, false),
-          percentOverall: computeOverallMulti(variants, 'encoding'),
-          encodingPercent: tick.encodingPercent,
-          uploadPercent: 0,
-          currentTimeSec: tick.currentTimeSec,
-          durationSec,
-          etaSecondsEncoding: tick.etaSecondsEncoding,
-          etaSecondsOverall: tick.etaSecondsEncoding,
-          bytesUploaded: 0,
-          bytesTotal: null,
-          message: `Convertendo ${label} (${j + 1}/${n})…`
-        });
-      });
-    } catch (e) {
-      console.error('[merge] ffmpeg falhou', label, e);
-      variants[j].phase = 'failed';
+    const onEncodingTick = (tick) => {
+      variants[j].encodingPercent = tick.encodingPercent;
+      variants[j].currentTimeSec = tick.currentTimeSec;
+      variants[j].etaSecondsEncoding = tick.etaSecondsEncoding;
       writeProgress(path, sessionName, {
         schemaVersion: 2,
         mergeMode: 'multi',
         videoCodec: videoCodecLabel,
-        phase: 'failed',
+        phase: 'encoding',
         currentVariant: { height: h, label, index: j + 1, total: n },
-        variants: snapVariants(variants, true),
-        percentOverall: computeOverallMulti(variants, 'failed'),
-        message: `${label}: ${e?.message || 'ffmpeg_failed'}`,
-        encodingPercent: variants[j].encodingPercent || 0,
-        uploadPercent: 0
-      }, { immediate: true });
-      try { unlinkSync(listPath); } catch (_) {}
-      const err = new Error('ffmpeg_failed');
-      err.mergeFail = true;
-      err.failedVariant = label;
-      err.reason = 'ffmpeg_failed';
-      throw err;
+        currentResolution: { height: h, label, index: j + 1, total: n },
+        variants: snapVariants(variants, false),
+        percentOverall: computeOverallMulti(variants, 'encoding'),
+        encodingPercent: tick.encodingPercent,
+        uploadPercent: 0,
+        currentTimeSec: tick.currentTimeSec,
+        durationSec,
+        etaSecondsEncoding: tick.etaSecondsEncoding,
+        etaSecondsOverall: tick.etaSecondsEncoding,
+        bytesUploaded: 0,
+        bytesTotal: null,
+        message: `Convertendo ${label} (${j + 1}/${n})…`
+      });
+    };
+    try {
+      await runFfmpegWithProgress(ffmpegArgs, durationSec, encStart, onEncodingTick);
+    } catch (e1) {
+      let errFinal = e1;
+      if (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') {
+        try {
+          if (existsSync(outPath)) unlinkSync(outPath);
+        } catch (_) {}
+        console.warn(`[merge] ${label}: HEVC falhou; retentativa com H.264 (mantém ${h}px)…`);
+        try {
+          await runFfmpegWithProgress(
+            buildFallbackH264Args(listPath, outPath, { targetHeight: h }),
+            durationSec,
+            encStart,
+            onEncodingTick
+          );
+          errFinal = null;
+        } catch (e2) {
+          errFinal = e2;
+        }
+      }
+      if (errFinal) {
+        console.error('[merge] ffmpeg falhou', label, errFinal);
+        variants[j].phase = 'failed';
+        writeProgress(path, sessionName, {
+          schemaVersion: 2,
+          mergeMode: 'multi',
+          videoCodec: videoCodecLabel,
+          phase: 'failed',
+          currentVariant: { height: h, label, index: j + 1, total: n },
+          variants: snapVariants(variants, true),
+          percentOverall: computeOverallMulti(variants, 'failed'),
+          message: `${label}: ${errFinal?.message || 'ffmpeg_failed'}`,
+          encodingPercent: variants[j].encodingPercent || 0,
+          uploadPercent: 0
+        }, { immediate: true });
+        removeMergeWorkDir(workDir);
+        const err = new Error('ffmpeg_failed');
+        err.mergeFail = true;
+        err.failedVariant = label;
+        err.reason = 'ffmpeg_failed';
+        throw err;
+      }
     }
 
     variants[j].encodingPercent = 100;
@@ -260,8 +378,10 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
     await runBatchedAll(indices, MERGE_ENCODE_CONCURRENCY, (j) => encodeVariant(j));
   } catch (e) {
     if (e.mergeFail) {
+      removeMergeWorkDir(workDir);
       return { ok: false, reason: e.reason || 'ffmpeg_failed', path, session: sessionName, failedVariant: e.failedVariant };
     }
+    removeMergeWorkDir(workDir);
     throw e;
   }
 
@@ -272,8 +392,13 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
       variantPayload.push({ height: h, label, id: label, key: null });
       variants[j].phase = 'done';
       variants[j].uploadPercent = 100;
+      const from = join(workDir, `${sessionName}_${h}.mp4`);
+      const to = join(sessionDir, `${sessionName}_${h}.mp4`);
+      try {
+        if (existsSync(from)) renameSync(from, to);
+      } catch (_) {}
     }
-    try { unlinkSync(listPath); } catch (_) {}
+    removeMergeWorkDir(workDir);
     writeProgress(path, sessionName, {
       schemaVersion: 2,
       mergeMode: 'multi',
@@ -293,7 +418,7 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
   for (let j = 0; j < n; j++) {
     const h = heights[j];
     const label = variantLabel(h);
-    const outPath = join(sessionDir, `${sessionName}_${h}.mp4`);
+    const outPath = join(workDir, `${sessionName}_${h}.mp4`);
     const r2Key = `${R2_VIDEOS_PREFIX}${path}/${sessionName}_${h}.mp4`;
 
     let fileSize;
@@ -381,23 +506,20 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
             message: `Upload ${label} falhou: ${e?.message}`,
             percentOverall: computeOverallMulti(variants, 'failed')
           }, { immediate: true });
-          try { unlinkSync(listPath); } catch (_) {}
+          removeMergeWorkDir(workDir);
           return { ok: false, reason: 'upload_failed', path, session: sessionName, failedVariant: label };
         }
         await new Promise((r) => setTimeout(r, attempt * 5000));
       }
     }
-    try { unlinkSync(outPath); } catch (_) {}
   }
 
-  try { unlinkSync(listPath); } catch (_) {}
+  removeMergeWorkDir(workDir);
 
   for (const f of tsFiles) {
     try { unlinkSync(join(sessionDir, f)); } catch (_) {}
   }
-  if (deleteFolderAfter) {
-    try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
-  }
+  removeSessionDirAfterMerge(sessionDir, deleteFolderAfter);
   if (isAula) {
     deleteAulaSourceTs(path, tsFiles);
     clearBoundariesForStream(path);
@@ -427,10 +549,14 @@ async function mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listP
   };
 }
 
+/** Mantém o fim do stderr do ffmpeg (diagnóstico em falhas). */
+const FFMPEG_STDERR_CAP = 96 * 1024;
+
 function runFfmpegWithProgress(ffmpegArgs, durationSec, startedAt, onTick) {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdoutBuf = '';
+    let stderrBuf = '';
     const timer = setTimeout(() => {
       proc.kill('SIGKILL');
       reject(new Error('ffmpeg timeout'));
@@ -456,7 +582,12 @@ function runFfmpegWithProgress(ffmpegArgs, durationSec, startedAt, onTick) {
         }
       }
     });
-    proc.stderr.on('data', () => {});
+    proc.stderr.on('data', (chunk) => {
+      stderrBuf += chunk.toString();
+      if (stderrBuf.length > FFMPEG_STDERR_CAP) {
+        stderrBuf = stderrBuf.slice(-FFMPEG_STDERR_CAP);
+      }
+    });
     proc.on('error', (e) => {
       clearTimeout(timer);
       reject(e);
@@ -464,7 +595,13 @@ function runFfmpegWithProgress(ffmpegArgs, durationSec, startedAt, onTick) {
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exit ${code}`));
+      else {
+        const lines = stderrBuf.trim().split(/\n/).filter((l) => l.length > 0);
+        const tail = lines.slice(-25).join('\n');
+        if (tail) console.error('[merge] ffmpeg stderr (exit ' + code + '):\n' + tail);
+        const last = lines[lines.length - 1] || `sem stderr (exit ${code})`;
+        reject(new Error(`ffmpeg exit ${code}: ${last.slice(0, 800)}`));
+      }
     });
   });
 }
@@ -494,7 +631,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     } else {
       const entries = readdirSync(fullPath, { withFileTypes: true });
       const dirs = entries
-        .filter(e => e.isDirectory())
+        .filter((e) => e.isDirectory() && !e.name.startsWith('_w_'))
         .map(e => ({ name: e.name, path: join(fullPath, e.name), mtime: statSync(join(fullPath, e.name)).mtime }))
         .sort((a, b) => b.mtime - a.mtime);
       if (!dirs[0]) return Promise.resolve({ ok: false, reason: 'no_session' });
@@ -516,7 +653,10 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
   }
 
   const isAula = sessionName.endsWith('_aula');
-  const listPath = join(sessionDir, '_concat.txt');
+  const jobId = `${process.pid}_${Date.now()}_${randomBytes(6).toString('hex')}`;
+  const workDir = join(sessionDir, `_w_${jobId}`);
+  mkdirSync(workDir, { recursive: true });
+  const listPath = join(workDir, '_concat.txt');
   const listContent = tsFiles.map(f => `file '${join(sessionDir, f)}'`).join('\n');
   writeFileSync(listPath, listContent);
 
@@ -527,7 +667,18 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     heights = null;
   }
   if (Array.isArray(heights) && heights.length > 0) {
-    return mergeAndUploadMulti(path, sessionName, sessionDir, tsFiles, listPath, durationSec, isAula, deleteFolderAfter, heights);
+    return mergeAndUploadMulti(
+      path,
+      sessionName,
+      sessionDir,
+      tsFiles,
+      listPath,
+      durationSec,
+      isAula,
+      deleteFolderAfter,
+      heights,
+      workDir
+    );
   }
 
   const videoCodecLabel = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') ? 'hevc' : 'h264';
@@ -539,7 +690,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     currentResolution: null,
     variants: null
   });
-  const outPath = join(sessionDir, `${sessionName}.mp4`);
+  const outPath = join(workDir, `${sessionName}.mp4`);
   const startedAt = Date.now();
 
   writeProgress(path, sessionName, {
@@ -566,6 +717,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     await new Promise((resolve, reject) => {
       const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdoutBuf = '';
+      let stderrBuf = '';
       const timer = setTimeout(() => {
         proc.kill('SIGKILL');
         reject(new Error('ffmpeg timeout'));
@@ -605,7 +757,12 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
           }
         }
       });
-      proc.stderr.on('data', () => {});
+      proc.stderr.on('data', (chunk) => {
+        stderrBuf += chunk.toString();
+        if (stderrBuf.length > FFMPEG_STDERR_CAP) {
+          stderrBuf = stderrBuf.slice(-FFMPEG_STDERR_CAP);
+        }
+      });
       proc.on('error', (e) => {
         clearTimeout(timer);
         reject(e);
@@ -613,12 +770,18 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       proc.on('close', (code) => {
         clearTimeout(timer);
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exit ${code}`));
+        else {
+          const lines = stderrBuf.trim().split(/\n/).filter((l) => l.length > 0);
+          const tail = lines.slice(-25).join('\n');
+          if (tail) console.error('[merge] ffmpeg stderr (exit ' + code + '):\n' + tail);
+          const last = lines[lines.length - 1] || `sem stderr (exit ${code})`;
+          reject(new Error(`ffmpeg exit ${code}: ${last.slice(0, 800)}`));
+        }
       });
     });
   } catch (e) {
     console.error('[merge] ffmpeg falhou', e);
-    try { unlinkSync(listPath); } catch (_) {}
+    removeMergeWorkDir(workDir);
     writeProgress(path, sessionName, {
       ...singlePb(),
       phase: 'failed',
@@ -627,15 +790,19 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       encodingPercent: 0,
       uploadPercent: 0
     }, { immediate: true });
-    return { ok: false, reason: 'ffmpeg_failed' };
+    return { ok: false, reason: 'ffmpeg_failed', path, session: sessionName };
   }
-  try { unlinkSync(listPath); } catch (_) {}
 
   if (!hasR2) {
-    console.log('[merge] R2 não configurado, mp4 gerado em', outPath);
+    const outFinal = join(sessionDir, `${sessionName}.mp4`);
+    try {
+      if (existsSync(outPath)) renameSync(outPath, outFinal);
+    } catch (_) {}
+    removeMergeWorkDir(workDir);
+    console.log('[merge] R2 não configurado, mp4 gerado em', outFinal);
     writeProgress(path, sessionName, { ...singlePb(), phase: 'done', percentOverall: 100, message: 'Concluído (sem R2)' }, { immediate: true });
     setTimeout(() => clearProgress(path, sessionName), 60000);
-    return { ok: true, local: outPath };
+    return { ok: true, local: outFinal };
   }
 
   let fileSize;
@@ -716,10 +883,8 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       for (const f of tsFiles) {
         try { unlinkSync(join(sessionDir, f)); } catch (_) {}
       }
-      try { unlinkSync(outPath); } catch (_) {}
-      if (deleteFolderAfter) {
-        try { rmSync(sessionDir, { recursive: true }); } catch (_) {}
-      }
+      removeMergeWorkDir(workDir);
+      removeSessionDirAfterMerge(sessionDir, deleteFolderAfter);
       if (isAula) {
         deleteAulaSourceTs(path, tsFiles);
         clearBoundariesForStream(path);
@@ -755,6 +920,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       }
     }
   }
+  removeMergeWorkDir(workDir);
   writeProgress(path, sessionName, {
     ...singlePb(),
     phase: 'failed',
@@ -763,7 +929,7 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     encodingPercent: 100,
     uploadPercent: 0
   }, { immediate: true });
-  return { ok: false, reason: 'upload_failed' };
+  return { ok: false, reason: 'upload_failed', path, session: sessionName };
 }
 
 async function notifyUploadComplete(path, session, variants = null) {
@@ -792,8 +958,17 @@ app.post('/merge', async (req, res) => {
   if (!path) {
     return res.status(400).json({ error: 'path obrigatório' });
   }
+  const firstSeg = String(path).replace(/^live\//, '').split('/')[0];
+  if (isMediamtxAbrVariantDir(firstSeg)) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        'path não pode ser variante ABR (live/<stream>_1080|_720|_480). Use live/<stream> ou sessão *_aula no ingest.'
+    });
+  }
   try {
     const session = req.query.session || req.body?.session;
+    console.log('[merge] Job iniciado (API):', path, session || '(auto/descobrir)');
     const result = await mergeAndUpload(path, session || null);
     if (result.ok && result.path && result.session && MERGE_CALLBACK_URL) {
       await notifyUploadComplete(result.path, result.session, result.variants || null);
@@ -887,7 +1062,9 @@ function scanRecordings() {
       return result;
     }
     result.underRecordings = readdirSync(RECORDINGS_DIR);
-    const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
+    const streams = readdirSync(pathBase, { withFileTypes: true }).filter(
+      (e) => e.isDirectory() && !isMediamtxAbrVariantDir(e.name)
+    );
     for (const s of streams) {
       const streamPath = join(pathBase, s.name);
       const tsInStream = readdirSync(streamPath).filter(f => f.endsWith('.ts'));
@@ -902,7 +1079,9 @@ function scanRecordings() {
           stale: ageSec >= 120
         });
       }
-      const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
+      const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(
+        (e) => e.isDirectory() && !e.name.startsWith('_w_')
+      );
       for (const sess of sessions) {
         const sessionPath = join(streamPath, sess.name);
         const tsFiles = readdirSync(sessionPath).filter(f => f.endsWith('.ts'));
@@ -929,19 +1108,22 @@ app.get('/debug', (req, res) => res.json(scanRecordings()));
 const STALE_MS = 2 * 60 * 1000;
 const processedDirs = new Set();
 
-let lastLogTime = 0;
+let lastScanSummary = '';
+let lastSummaryLogTime = 0;
 let scanCount = 0;
 function findStaleSessions() {
   try {
     scanCount++;
     const pathBase = join(RECORDINGS_DIR, 'live');
     if (!existsSync(pathBase)) {
-      if (scanCount % 20 === 1) console.log('[merge] Scan:', pathBase, 'não existe');
+      if (scanCount % 120 === 1) console.log('[merge] Scan:', pathBase, 'não existe');
       return;
     }
-    const streams = readdirSync(pathBase, { withFileTypes: true }).filter(e => e.isDirectory());
+    const streams = readdirSync(pathBase, { withFileTypes: true }).filter(
+      (e) => e.isDirectory() && !isMediamtxAbrVariantDir(e.name)
+    );
     if (streams.length === 0) {
-      if (scanCount % 20 === 1) console.log('[merge] Scan:', pathBase, 'vazio (MediaMTX não gravou?)');
+      if (scanCount % 120 === 1) console.log('[merge] Scan:', pathBase, 'vazio (MediaMTX não gravou?)');
       return;
     }
     let totalSessions = 0;
@@ -959,13 +1141,24 @@ function findStaleSessions() {
           if (!processedDirs.has(key)) {
             processedDirs.add(key);
             console.log('[merge] Stream finalizado (flat):', mtxPath, tsInStream.length, 'segmentos');
+            console.log('[merge] Job iniciado (scan flat):', mtxPath, `(${tsInStream.length} .ts)`);
             mergeAndUpload(mtxPath).then(async (r) => {
               processedDirs.delete(key);
               if (r.ok) {
                 console.log('[merge] Upload OK:', r.key);
-                if (r.path && r.session && MERGE_CALLBACK_URL) await notifyUploadComplete(r.path, r.session);
+                if (r.path && r.session && MERGE_CALLBACK_URL) {
+                  await notifyUploadComplete(r.path, r.session, r.variants || null);
+                }
               } else {
-                console.warn('[merge] Falhou:', r.reason);
+                console.warn(
+                  '[merge] Falhou:',
+                  JSON.stringify({
+                    reason: r.reason,
+                    path: r.path,
+                    session: r.session,
+                    failedVariant: r.failedVariant || null
+                  })
+                );
               }
             }).catch(e => {
               processedDirs.delete(key);
@@ -975,7 +1168,9 @@ function findStaleSessions() {
         }
       }
 
-      const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(e => e.isDirectory());
+      const sessions = readdirSync(streamPath, { withFileTypes: true }).filter(
+        (e) => e.isDirectory() && !e.name.startsWith('_w_')
+      );
       for (const sess of sessions) {
         if (sess.name.endsWith('_aula')) continue;
         const sessionPath = join(streamPath, sess.name);
@@ -989,13 +1184,22 @@ function findStaleSessions() {
         if (age < STALE_MS) continue;
         processedDirs.add(key);
         console.log('[merge] Sessão finalizada detectada:', mtxPath, sess.name);
+        console.log('[merge] Job iniciado (scan pasta):', mtxPath, sess.name);
         mergeAndUpload(mtxPath, sess.name).then(async (r) => {
           processedDirs.delete(key);
           if (r.ok) {
             console.log('[merge] Upload OK:', r.key);
             if (r.path && r.session && MERGE_CALLBACK_URL) await notifyUploadComplete(r.path, r.session, r.variants || null);
           } else {
-            console.warn('[merge] Falhou:', r.reason);
+            console.warn(
+              '[merge] Falhou:',
+              JSON.stringify({
+                reason: r.reason,
+                path: r.path,
+                session: r.session,
+                failedVariant: r.failedVariant || null
+              })
+            );
           }
         }).catch(e => {
           processedDirs.delete(key);
@@ -1003,9 +1207,19 @@ function findStaleSessions() {
         });
       }
     }
-    if (totalSessions > 0 && Date.now() - lastLogTime > 60000) {
-      lastLogTime = Date.now();
-      console.log(`[merge] Scan: ${streams.length} stream(s), ${totalSessions} sessão(ões) com .ts`);
+    if (totalSessions === 0) {
+      lastScanSummary = '';
+    } else if (MERGE_SCAN_SUMMARY) {
+      const summary = `${streams.length} stream(s), ${totalSessions} sessão(ões) com .ts`;
+      const now = Date.now();
+      const changed = summary !== lastScanSummary;
+      const heartbeat =
+        MERGE_SCAN_SUMMARY_INTERVAL_MS > 0 && now - lastSummaryLogTime >= MERGE_SCAN_SUMMARY_INTERVAL_MS;
+      if (changed || heartbeat) {
+        lastScanSummary = summary;
+        lastSummaryLogTime = now;
+        console.log(`[merge] Scan: ${summary}`);
+      }
     }
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[merge] scan error', e.message);
@@ -1021,10 +1235,13 @@ app.listen(PORT, () => {
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
   const mh = parseMergeHeights();
   if (mh) {
-    const encNote = MERGE_ENCODE_CONCURRENCY > 1
-      ? ` Até ${MERGE_ENCODE_CONCURRENCY} encodes em paralelo (MERGE_ENCODE_CONCURRENCY).`
-      : '';
-    console.log(`[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (MERGE_RESOLUTIONS).${encNote}`);
+    const encNote =
+      MERGE_ENCODE_CONCURRENCY > 1
+        ? ` Até ${MERGE_ENCODE_CONCURRENCY} encodes em paralelo (MERGE_ENCODE_CONCURRENCY).`
+        : '';
+    console.log(
+      `[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (MERGE_RESOLUTIONS).${encNote} Todas as resoluções têm de concluir; se HEVC falhar, há uma retentativa automática com H.264 na mesma altura.`
+    );
   } else {
     console.log('[merge] Saída única: session.mp4 (MERGE_RESOLUTIONS=single)');
   }

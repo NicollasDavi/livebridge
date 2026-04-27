@@ -1,5 +1,5 @@
 import { createReadStream } from 'fs';
-import { readFile } from 'fs/promises';
+import { readFile, copyFile, link } from 'fs/promises';
 import { join } from 'path';
 import { ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import * as cfg from '../config.js';
@@ -11,14 +11,17 @@ import {
   decodeS3Cursor,
   encodeS3Cursor,
   mapContentsToRecordings,
+  collapseMultiresRecordingRows,
   sortRecordingsList
 } from '../services/r2Listing.js';
 import {
   fetchLessons,
   invalidateLessonsCache,
-  lessonsHeaders
+  lessonsHeaders,
+  logLessonsApiAuthFailure
 } from '../services/lessons.js';
 import * as disk from '../services/disk.js';
+import { isMainLiveStreamOnline } from '../services/mediamtxControl.js';
 import { requireR2, requireVideoAuth } from '../middleware/authRecordings.js';
 
 function enrichRecordingsWithLessons(r2List, lessons) {
@@ -38,6 +41,122 @@ function enrichRecordingsWithLessons(r2List, lessons) {
     rec.cursos = Array.isArray(lesson?.cursos) ? lesson.cursos : [];
     rec.ativo = lesson?.ativo ?? true;
   }
+}
+
+/** Renditions gravadas em paralelo ao ingest (MediaMTX paths live/<stream>_<h>). */
+const ABR_RENDITIONS = ['1080', '720', '480'];
+
+function findRecordingTsSource(fullPath) {
+  if (!disk.existsSync(fullPath)) return null;
+  const tsInStream = disk.readdirSync(fullPath).filter((f) => f.endsWith('.ts'));
+  if (tsInStream.length > 0) {
+    return { srcDir: fullPath, allTs: tsInStream.sort(disk.tsSort) };
+  }
+  const dirs = disk
+    .readdirSync(fullPath, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith('_w_'))
+    .map((e) => ({ name: e.name, mtime: disk.statSync(join(fullPath, e.name)).mtime }))
+    .sort((a, b) => b.mtime - a.mtime);
+  if (!dirs[0]) return null;
+  const srcDir = join(fullPath, dirs[0].name);
+  const allTs = disk.readdirSync(srcDir).filter((f) => f.endsWith('.ts')).sort(disk.tsSort);
+  if (allTs.length === 0) return null;
+  return { srcDir, allTs };
+}
+
+function sliceTsAfterBoundary(allTs, lastIncluded) {
+  if (!lastIncluded) {
+    const files = [...allTs];
+    return { files, lastFile: files.length ? files[files.length - 1] : null };
+  }
+  const idx = allTs.indexOf(lastIncluded);
+  const files = idx >= 0 ? allTs.slice(idx + 1) : [...allTs];
+  return { files, lastFile: files.length ? files[files.length - 1] : null };
+}
+
+/**
+ * Fatia de .ts da variante ABR para esta aula.
+ * Sem último ficheiro guardado: usar **todos** os .ts da sessão atual na variante — não os últimos N da lista,
+ * porque N = contagem na base e as variantes podem ter mais segmentos (mesmo tempo, mais ficheiros);
+ * slice(-N) cortava o início e o HLS “só mostrava o fim”, como se a aula tivesse começado de novo.
+ */
+function variantSliceForBoundary(variantAllTs, lastVarFile) {
+  if (!lastVarFile) {
+    const files = [...variantAllTs];
+    return { files, lastFile: files.length ? files[files.length - 1] : null };
+  }
+  return sliceTsAfterBoundary(variantAllTs, lastVarFile);
+}
+
+function partialAbrHasSegments(sessionDir) {
+  if (!disk.existsSync(sessionDir)) return false;
+  return ABR_RENDITIONS.some((h) => {
+    const d = join(sessionDir, `_${h}`);
+    if (!disk.existsSync(d)) return false;
+    return disk.readdirSync(d).some((f) => f.endsWith('.ts'));
+  });
+}
+
+/** Hard link no mesmo volume = instantâneo; cópia só se FS não suportar (EXDEV, SMB, etc.). */
+async function linkOrCopy(src, dest) {
+  try {
+    await link(src, dest);
+  } catch (e) {
+    const c = e?.code;
+    if (c === 'EEXIST') {
+      await copyFile(src, dest);
+      return;
+    }
+    if (c === 'EXDEV' || c === 'EPERM' || c === 'EOPNOTSUPP' || c === 'ENOTSUP') {
+      await copyFile(src, dest);
+      return;
+    }
+    throw e;
+  }
+}
+
+function hlsMasterUrlForPartial(req, path, session, tokenQ) {
+  const q = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}${tokenQ}`;
+  return cfg.publicApiUrl(req, `/api/recordings/hls/master.m3u8?${q}`);
+}
+
+function recordingsPlaylistUrl(req, path, session) {
+  return cfg.publicApiUrl(
+    req,
+    `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
+  );
+}
+
+function recordingsMergeProgressUrl(req, path, session) {
+  return cfg.publicApiUrl(
+    req,
+    `/api/recordings/merge-progress?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
+  );
+}
+
+/** Após merge bem-sucedido o JSON local é apagado; confirma no R2 para o front não mostrar "failed". */
+function mergeFetchOptions() {
+  const ms = cfg.MERGE_POST_TIMEOUT_MS;
+  if (ms > 0 && typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return { method: 'POST', signal: AbortSignal.timeout(ms) };
+  }
+  return { method: 'POST' };
+}
+
+async function r2HasAnySessionMp4(streamName, session) {
+  if (!hasR2 || !s3) return false;
+  const base = `${R2_VIDEOS_PREFIX}live/${streamName}/${session}`;
+  const keys = [`${base}.mp4`, `${base}_1080.mp4`, `${base}_720.mp4`, `${base}_480.mp4`];
+  for (const Key of keys) {
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: cfg.R2_BUCKET, Key }));
+      return true;
+    } catch (e) {
+      const code = e?.$metadata?.httpStatusCode;
+      if (e?.name === 'NotFound' || code === 404) continue;
+    }
+  }
+  return false;
 }
 
 export function registerRecordingsRoutes(app) {
@@ -65,7 +184,7 @@ export function registerRecordingsRoutes(app) {
             MaxKeys: maxKeys
           })
         );
-        const r2List = mapContentsToRecordings(result.Contents);
+        const r2List = collapseMultiresRecordingRows(mapContentsToRecordings(result.Contents));
         sortRecordingsList(r2List);
         const lessons = await lessonsPromise;
         setVideoAccessCookie(res);
@@ -100,8 +219,9 @@ export function registerRecordingsRoutes(app) {
           list.push(...mapContentsToRecordings(result.Contents));
           continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
         } while (continuationToken);
-        sortRecordingsList(list);
-        return list;
+        const collapsed = collapseMultiresRecordingRows(list);
+        sortRecordingsList(collapsed);
+        return collapsed;
       })();
 
       const [r2List, lessons] = await Promise.all([r2Promise, lessonsPromise]);
@@ -116,6 +236,48 @@ export function registerRecordingsRoutes(app) {
     }
   });
 
+  app.get('/api/recordings/hls/master.m3u8', requireVideoAuth, async (req, res) => {
+    try {
+      const { path: p, session } = req.query;
+      if (!p || !session || typeof p !== 'string' || typeof session !== 'string') {
+        return res.status(400).type('text/plain').send('path e session obrigatórios');
+      }
+      if (p.includes('..') || session.includes('..')) {
+        return res.status(400).type('text/plain').send('path inválido');
+      }
+      const tokenPart = req.query.token ? `&token=${encodeURIComponent(req.query.token)}` : '';
+      const variantDefs = [
+        { h: '1080', bw: cfg.LIVE_ABR_BANDWIDTH_1080, resolution: '1920x1080' },
+        { h: '720', bw: cfg.LIVE_ABR_BANDWIDTH_720, resolution: '1280x720' },
+        { h: '480', bw: cfg.LIVE_ABR_BANDWIDTH_480, resolution: '854x480' }
+      ];
+      const lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+      let any = false;
+      const sessionBase = join(cfg.RECORDINGS_DIR, p, session);
+      for (const { h, bw, resolution } of variantDefs) {
+        const dir = join(sessionBase, `_${h}`);
+        if (!disk.existsSync(dir)) continue;
+        const names = await disk.readdir(dir);
+        if (!names.some((f) => f.endsWith('.ts'))) continue;
+        any = true;
+        lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${resolution},NAME="${h}p"`);
+        lines.push(
+          `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(p)}&session=${encodeURIComponent(session)}&rendition=${h}${tokenPart}`
+        );
+      }
+      if (!any) {
+        return res.status(404).type('text/plain').send('Nenhuma variante ABR disponível para esta sessão');
+      }
+      lines.push('');
+      res.set('Content-Type', 'application/vnd.apple.mpegurl');
+      res.set('Cache-Control', 'no-store');
+      res.send(lines.join('\n'));
+    } catch (e) {
+      console.error(e);
+      res.status(500).type('text/plain').send(e.message);
+    }
+  });
+
   app.get('/api/recordings/hls/playlist.m3u8', requireVideoAuth, async (req, res) => {
     try {
       const { path: p, session } = req.query;
@@ -123,11 +285,25 @@ export function registerRecordingsRoutes(app) {
         return res.status(400).json({ error: 'path e session obrigatórios' });
       }
       if (p.includes('..') || session.includes('..')) return res.status(400).json({ error: 'path inválido' });
-      let dir = join(cfg.RECORDINGS_DIR, p, session);
-      const isFlat = !disk.existsSync(dir);
-      if (isFlat) {
-        dir = join(cfg.RECORDINGS_DIR, p);
-        if (!disk.existsSync(dir)) return res.status(404).json({ error: 'Gravação não encontrada ou já processada' });
+      const renditionRaw = req.query.rendition;
+      const rendition =
+        typeof renditionRaw === 'string' && ABR_RENDITIONS.includes(renditionRaw) ? renditionRaw : null;
+
+      let dir;
+      let isFlat;
+      if (rendition) {
+        dir = join(cfg.RECORDINGS_DIR, p, session, `_${rendition}`);
+        isFlat = false;
+        if (!disk.existsSync(dir)) {
+          return res.status(404).json({ error: 'Gravação não encontrada ou já processada' });
+        }
+      } else {
+        dir = join(cfg.RECORDINGS_DIR, p, session);
+        isFlat = !disk.existsSync(dir);
+        if (isFlat) {
+          dir = join(cfg.RECORDINGS_DIR, p);
+          if (!disk.existsSync(dir)) return res.status(404).json({ error: 'Gravação não encontrada ou já processada' });
+        }
       }
       const names = await disk.readdir(dir);
       const tsFiles = names
@@ -140,9 +316,13 @@ export function registerRecordingsRoutes(app) {
       if (tsFiles.length === 0) return res.status(404).json({ error: 'Nenhum segmento disponível' });
       const tokenPart = req.query.token ? `&token=${encodeURIComponent(req.query.token)}` : '';
       const segSession = isFlat ? 'flat' : session;
-      const baseUrl = `/api/recordings/hls/segment?path=${encodeURIComponent(p)}&session=${encodeURIComponent(segSession)}${tokenPart}&file=`;
+      const rendPart = rendition ? `&rendition=${encodeURIComponent(rendition)}` : '';
+      const baseUrl = `/api/recordings/hls/segment?path=${encodeURIComponent(p)}&session=${encodeURIComponent(segSession)}${rendPart}${tokenPart}&file=`;
       const targetDuration = 60;
-      let m3u8 = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:' + targetDuration + '\n#EXT-X-MEDIA-SEQUENCE:0\n';
+      let m3u8 =
+        '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:' +
+        targetDuration +
+        '\n#EXT-X-MEDIA-SEQUENCE:0\n';
       for (const f of tsFiles) {
         m3u8 += `#EXTINF:${targetDuration},\n${baseUrl}${encodeURIComponent(f)}\n`;
       }
@@ -161,6 +341,9 @@ export function registerRecordingsRoutes(app) {
       if (!p || !session || !file || typeof p !== 'string' || typeof session !== 'string' || typeof file !== 'string') {
         return res.status(400).json({ error: 'path, session e file obrigatórios' });
       }
+      const renditionRaw = req.query.rendition;
+      const rendition =
+        typeof renditionRaw === 'string' && ABR_RENDITIONS.includes(renditionRaw) ? renditionRaw : null;
       if (
         p.includes('..') ||
         session.includes('..') ||
@@ -171,8 +354,14 @@ export function registerRecordingsRoutes(app) {
       ) {
         return res.status(400).json({ error: 'parâmetros inválidos' });
       }
-      const filePath =
-        session === 'flat' ? join(cfg.RECORDINGS_DIR, p, file) : join(cfg.RECORDINGS_DIR, p, session, file);
+      let filePath;
+      if (session === 'flat') {
+        filePath = join(cfg.RECORDINGS_DIR, p, file);
+      } else if (rendition) {
+        filePath = join(cfg.RECORDINGS_DIR, p, session, `_${rendition}`, file);
+      } else {
+        filePath = join(cfg.RECORDINGS_DIR, p, session, file);
+      }
       if (!disk.existsSync(filePath)) return res.status(404).json({ error: 'Segmento não encontrado' });
       res.set('Content-Type', 'video/mp2t');
       createReadStream(filePath).pipe(res);
@@ -259,13 +448,17 @@ export function registerRecordingsRoutes(app) {
       if (!cfg.hasLessonsApi) {
         return res.status(503).json({ error: 'API Lessons não configurada. Defina LESSONS_API_URL e LESSONS_API_TOKEN.' });
       }
-      const res2 = await fetch(`${cfg.LESSONS_API_URL}/api/lessons`, {
+      const lessonsPutUrl = `${cfg.LESSONS_API_URL}/api/lessons`;
+      const res2 = await fetch(lessonsPutUrl, {
         method: 'PUT',
         headers: lessonsHeaders,
         body: JSON.stringify({ id, nome: name?.trim() || null })
       });
       const data = await res2.json().catch(() => ({}));
-      if (!res2.ok) return res.status(res2.status).json(data);
+      if (!res2.ok) {
+        logLessonsApiAuthFailure(res2.status, lessonsPutUrl, 'PUT name');
+        return res.status(res2.status).json(data);
+      }
       invalidateLessonsCache();
       res.json({ ok: true, name: name?.trim() || null });
     } catch (e) {
@@ -282,13 +475,17 @@ export function registerRecordingsRoutes(app) {
         return res.status(503).json({ error: 'API Lessons não configurada. Defina LESSONS_API_URL e LESSONS_API_TOKEN.' });
       }
       const ativoValue = ativo === false || ativo === 'false' ? false : true;
-      const res2 = await fetch(`${cfg.LESSONS_API_URL}/api/lessons`, {
+      const lessonsPutUrl = `${cfg.LESSONS_API_URL}/api/lessons`;
+      const res2 = await fetch(lessonsPutUrl, {
         method: 'PUT',
         headers: lessonsHeaders,
         body: JSON.stringify({ id, numero, nome, assunto, professor, materia, frente, cursos, ativo: ativoValue })
       });
       const data = await res2.json().catch(() => ({}));
-      if (!res2.ok) return res.status(res2.status).json(data);
+      if (!res2.ok) {
+        logLessonsApiAuthFailure(res2.status, lessonsPutUrl, 'PUT metadata');
+        return res.status(res2.status).json(data);
+      }
       invalidateLessonsCache();
       res.json({ ok: true, aula: data });
     } catch (e) {
@@ -366,7 +563,7 @@ export function registerRecordingsRoutes(app) {
       }
 
       const mergeUrl = `${cfg.MERGE_INTERNAL_URL}/merge?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`;
-      fetch(mergeUrl, { method: 'POST' })
+      fetch(mergeUrl, mergeFetchOptions())
         .then(async (mergeRes) => {
           const data = await mergeRes.json().catch(() => ({}));
           if (data.ok) {
@@ -376,8 +573,9 @@ export function registerRecordingsRoutes(app) {
           }
         })
         .catch((e) => {
-          console.error('[API] Erro ao chamar merge:', e?.message);
-          disk.writeLiveEndedStatus(stream, { path, session, status: 'failed', reason: e?.message });
+          const reason = e?.message || String(e);
+          console.error('[API] Erro ao chamar merge (live-ended):', reason, e?.cause || '');
+          disk.writeLiveEndedStatus(stream, { path, session, status: 'failed', reason });
         });
 
       res.json({
@@ -406,35 +604,16 @@ export function registerRecordingsRoutes(app) {
         return res.status(404).json({ error: 'Nenhuma gravação ativa para este stream' });
       }
 
-      let srcDir;
-      let allTs;
-      const tsInStream = disk.readdirSync(fullPath).filter((f) => f.endsWith('.ts'));
-      if (tsInStream.length > 0) {
-        srcDir = fullPath;
-        allTs = tsInStream.sort(disk.tsSort);
-      } else {
-        const dirs = disk
-          .readdirSync(fullPath, { withFileTypes: true })
-          .filter((e) => e.isDirectory())
-          .map((e) => ({ name: e.name, mtime: disk.statSync(join(fullPath, e.name)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
-        if (!dirs[0]) return res.status(404).json({ error: 'Nenhum segmento .ts encontrado' });
-        srcDir = join(fullPath, dirs[0].name);
-        allTs = disk.readdirSync(srcDir).filter((f) => f.endsWith('.ts')).sort(disk.tsSort);
-      }
+      const baseSource = findRecordingTsSource(fullPath);
+      if (!baseSource) return res.status(404).json({ error: 'Nenhum segmento .ts encontrado' });
 
-      const lastIncluded = disk.readLastBoundary(stream);
-      let tsFiles = allTs;
-      if (lastIncluded) {
-        const idx = allTs.indexOf(lastIncluded);
-        if (idx >= 0) {
-          tsFiles = allTs.slice(idx + 1);
-        }
-      }
+      const prevBound = disk.readBoundaryState(stream);
+      const baseSlice = sliceTsAfterBoundary(baseSource.allTs, prevBound.lastIncludedTs);
+      const tsFiles = baseSlice.files;
 
       if (tsFiles.length === 0) {
         return res.status(404).json({
-          error: lastIncluded
+          error: prevBound.lastIncludedTs
             ? 'Nenhum segmento novo desde o último "aula acabou". Aguarde mais gravação.'
             : 'Nenhum segmento .ts para copiar'
         });
@@ -446,13 +625,79 @@ export function registerRecordingsRoutes(app) {
       const partialDir = join(fullPath, session);
       disk.mkdirSync(partialDir, { recursive: true });
 
-      for (const f of tsFiles) {
-        disk.copyFileSync(join(srcDir, f), join(partialDir, f));
+      // Hard links: O(n) em metadados, sem duplicar GB. copyFile só se outro volume / FS sem link.
+      const linkConcurrency = cfg.LESSON_BOUNDARY_LINK_CONCURRENCY;
+      await mapPool(tsFiles, linkConcurrency, (f) =>
+        linkOrCopy(join(baseSource.srcDir, f), join(partialDir, f))
+      );
+
+      const nextVar = { ...(prevBound.lastIncludedByVariant || {}) };
+      for (const h of ABR_RENDITIONS) {
+        const varPath = join(cfg.RECORDINGS_DIR, `live/${stream}_${h}`);
+        const vs = findRecordingTsSource(varPath);
+        if (!vs) continue;
+        const lastVar = prevBound.lastIncludedByVariant?.[h] ?? null;
+        const vslice = variantSliceForBoundary(vs.allTs, lastVar);
+        if (vslice.files.length === 0) continue;
+        const sub = join(partialDir, `_${h}`);
+        disk.mkdirSync(sub, { recursive: true });
+        await mapPool(vslice.files, linkConcurrency, (f) =>
+          linkOrCopy(join(vs.srcDir, f), join(sub, f))
+        );
+        nextVar[h] = vslice.lastFile;
       }
-      disk.writeLastBoundary(stream, tsFiles[tsFiles.length - 1]);
+
+      disk.writeBoundaryState(stream, {
+        lastIncludedTs: baseSlice.lastFile,
+        lastIncludedByVariant: nextVar
+      });
 
       const videoPath = `${path}/${session}.mp4`;
       disk.writeLiveEndedPartial(stream, session, { path, session, status: 'processing', endedAt: now.toISOString() });
+
+      const mergeUrl = `${cfg.MERGE_INTERNAL_URL}/merge?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`;
+      const runLessonBoundaryMerge = () => {
+        fetch(mergeUrl, mergeFetchOptions())
+          .then(async (mergeRes) => {
+            const data = await mergeRes.json().catch(() => ({}));
+            if (data.ok) {
+              disk.deleteLiveEndedPartial(stream, session);
+            } else {
+              disk.writeLiveEndedPartial(stream, session, {
+                path,
+                session,
+                status: 'failed',
+                reason: data.reason || 'merge_failed'
+              });
+            }
+          })
+          .catch((e) => {
+            const reason = e?.message || String(e);
+            console.error('[API] Erro ao chamar merge (lesson-boundary):', reason, e?.cause || '');
+            disk.writeLiveEndedPartial(stream, session, { path, session, status: 'failed', reason });
+          });
+      };
+      const mergeDelay = cfg.LESSON_BOUNDARY_MERGE_DELAY_MS;
+      if (mergeDelay > 0) {
+        setTimeout(runLessonBoundaryMerge, mergeDelay);
+      } else {
+        runLessonBoundaryMerge();
+      }
+
+      const payload = {
+        ok: true,
+        path,
+        session,
+        status: 'processing',
+        message:
+          'Aula registrada. Vídeo disponível em HLS enquanto compacta. Após upload no R2, os .ts desta aula são removidos do disco.',
+        hlsUrl: recordingsPlaylistUrl(req, path, session),
+        mergeProgressUrl: recordingsMergeProgressUrl(req, path, session)
+      };
+      if (partialAbrHasSegments(partialDir)) {
+        payload.hlsMasterUrl = hlsMasterUrlForPartial(req, path, session, '');
+      }
+      res.json(payload);
 
       if (cfg.VIDEOS_API_URL && cfg.VIDEOS_API_TOKEN) {
         const videoName = name ?? videoPath;
@@ -466,57 +711,25 @@ export function registerRecordingsRoutes(app) {
           folder_ids: Array.isArray(folder_ids) ? folder_ids : [],
           course_ids: Array.isArray(course_ids) ? course_ids : []
         };
-        try {
-          const res2 = await fetch(`${cfg.VIDEOS_API_URL}/api/videos`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Access-Token': cfg.VIDEOS_API_TOKEN },
-            body: JSON.stringify(body)
-          });
-          const data = await res2.json().catch(() => ({}));
-          if (res2.ok) {
-            disk.writeLiveEndedPartial(stream, session, {
-              path,
-              session,
-              status: 'processing',
-              videoId: data.id,
-              endedAt: now.toISOString()
-            });
-          }
-        } catch (e) {
-          console.warn('[API] Erro ao registrar vídeo na API:', e?.message);
-        }
-      }
-
-      const mergeUrl = `${cfg.MERGE_INTERNAL_URL}/merge?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`;
-      fetch(mergeUrl, { method: 'POST' })
-        .then(async (mergeRes) => {
-          const data = await mergeRes.json().catch(() => ({}));
-          if (data.ok) {
-            disk.deleteLiveEndedPartial(stream, session);
-          } else {
-            disk.writeLiveEndedPartial(stream, session, {
-              path,
-              session,
-              status: 'failed',
-              reason: data.reason || 'merge_failed'
-            });
-          }
+        fetch(`${cfg.VIDEOS_API_URL}/api/videos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Access-Token': cfg.VIDEOS_API_TOKEN },
+          body: JSON.stringify(body)
         })
-        .catch((e) => {
-          console.error('[API] Erro ao chamar merge:', e?.message);
-          disk.writeLiveEndedPartial(stream, session, { path, session, status: 'failed', reason: e?.message });
-        });
-
-      res.json({
-        ok: true,
-        path,
-        session,
-        status: 'processing',
-        message:
-          'Aula registrada. Vídeo disponível em HLS enquanto compacta. Após upload no R2, os .ts desta aula são removidos do disco.',
-        hlsUrl: `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`,
-        mergeProgressUrl: `/api/recordings/merge-progress?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
-      });
+          .then(async (res2) => {
+            const data = await res2.json().catch(() => ({}));
+            if (res2.ok) {
+              disk.writeLiveEndedPartial(stream, session, {
+                path,
+                session,
+                status: 'processing',
+                videoId: data.id,
+                endedAt: now.toISOString()
+              });
+            }
+          })
+          .catch((e) => console.warn('[API] Erro ao registrar vídeo na API:', e?.message));
+      }
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: e.message });
@@ -532,19 +745,24 @@ export function registerRecordingsRoutes(app) {
           const raw = await readFile(join(cfg.LIVE_ENDED_DIR, f), 'utf8');
           const data = JSON.parse(raw);
           if (!data || !data.path || !data.session) return null;
+          const sessionDir = join(cfg.RECORDINGS_DIR, data.path, data.session);
+          const processingAula = data.session?.endsWith('_aula') && data.status === 'processing';
           return {
             streamName: data.path.replace(/^live\//, ''),
             path: data.path,
             session: data.session,
             status: data.status || 'processing',
             videoPath: data.status === 'ready' ? `${data.path}/${data.session}.mp4` : null,
-            hlsUrl:
-              data.session?.endsWith('_aula') && data.status === 'processing'
-                ? `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(data.path)}&session=${encodeURIComponent(data.session)}`
+            hlsUrl: processingAula
+              ? recordingsPlaylistUrl(req, data.path, data.session)
+              : null,
+            hlsMasterUrl:
+              processingAula && partialAbrHasSegments(sessionDir)
+                ? hlsMasterUrlForPartial(req, data.path, data.session, '')
                 : null,
             mergeProgressUrl:
               data.status === 'processing'
-                ? `/api/recordings/merge-progress?path=${encodeURIComponent(data.path)}&session=${encodeURIComponent(data.session)}`
+                ? recordingsMergeProgressUrl(req, data.path, data.session)
                 : null,
             endedAt: data.endedAt,
             updatedAt: data.updatedAt
@@ -573,19 +791,17 @@ export function registerRecordingsRoutes(app) {
         const statusData = disk.readLiveEndedPartial(stream, sessionParam);
         if (statusData) {
           const { path, session, status } = statusData;
+          const sessionDir = join(cfg.RECORDINGS_DIR, path, session);
+          const proc = status === 'processing';
           return res.json({
             path,
             session,
             status: status || 'processing',
             videoPath: status === 'ready' ? `${path}/${session}.mp4` : null,
-            hlsUrl:
-              status === 'processing'
-                ? `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
-                : null,
-            mergeProgressUrl:
-              status === 'processing'
-                ? `/api/recordings/merge-progress?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
-                : null,
+            hlsUrl: proc ? recordingsPlaylistUrl(req, path, session) : null,
+            hlsMasterUrl:
+              proc && partialAbrHasSegments(sessionDir) ? hlsMasterUrlForPartial(req, path, session, '') : null,
+            mergeProgressUrl: proc ? recordingsMergeProgressUrl(req, path, session) : null,
             message:
               status === 'processing'
                 ? 'Compactando e enviando...'
@@ -594,26 +810,64 @@ export function registerRecordingsRoutes(app) {
                   : statusData.reason || status
           });
         }
+        const pathLive = `live/${stream}`;
+        if (await r2HasAnySessionMp4(stream, sessionParam)) {
+          return res.json({
+            path: pathLive,
+            session: sessionParam,
+            status: 'ready',
+            videoPath: `${pathLive}/${sessionParam}.mp4`,
+            hlsUrl: null,
+            hlsMasterUrl: null,
+            mergeProgressUrl: null,
+            message: 'Upload concluído (vídeo no armazenamento).'
+          });
+        }
         return res.json({ path: null, session: null, status: 'not_found', message: 'Gravação não encontrada' });
       }
       const statusData = disk.readLiveEndedStatus(stream);
       if (statusData) {
         const { path, session, status } = statusData;
+        const mergeProgressUrl =
+          status === 'processing' ? recordingsMergeProgressUrl(req, path, session) : null;
+        const mergeMessage =
+          status === 'processing'
+            ? 'Compactando e enviando...'
+            : status === 'ready'
+              ? 'Pronto'
+              : statusData.reason || status;
+
+        let publisherStillLive = false;
+        try {
+          publisherStillLive = await isMainLiveStreamOnline(stream);
+        } catch (_) {}
+
+        if (publisherStillLive) {
+          const discovered = await disk.discoverCurrentSessionAsync(stream);
+          return res.json({
+            path: discovered?.path ?? path,
+            session: discovered?.session ?? session,
+            status: 'live',
+            videoPath: null,
+            message: 'Gravando',
+            mergePending: {
+              path,
+              session,
+              status: status || 'processing',
+              videoPath: status === 'ready' ? `${path}/${session}.mp4` : null,
+              mergeProgressUrl,
+              message: mergeMessage
+            }
+          });
+        }
+
         return res.json({
           path,
           session,
           status: status || 'processing',
           videoPath: status === 'ready' ? `${path}/${session}.mp4` : null,
-          mergeProgressUrl:
-            status === 'processing'
-              ? `/api/recordings/merge-progress?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
-              : null,
-          message:
-            status === 'processing'
-              ? 'Compactando e enviando...'
-              : status === 'ready'
-                ? 'Pronto'
-                : statusData.reason || status
+          mergeProgressUrl,
+          message: mergeMessage
         });
       }
       const discovered = await disk.discoverCurrentSessionAsync(stream);
@@ -641,6 +895,19 @@ export function registerRecordingsRoutes(app) {
       if (p.includes('..') || session.includes('..')) return res.status(400).json({ error: 'parâmetros inválidos' });
       const fp = disk.mergeProgressFilePath(p, session);
       if (!disk.existsSync(fp)) {
+        if (session.endsWith('_aula') && p.startsWith('live/')) {
+          const sn = p.replace(/^live\//, '');
+          if (sn && !sn.includes('/') && (await r2HasAnySessionMp4(sn, session))) {
+            return res.json({
+              path: p,
+              session,
+              status: 'done',
+              phase: 'done',
+              percentOverall: 100,
+              message: 'Concluído (vídeo disponível no armazenamento).'
+            });
+          }
+        }
         return res.json({
           status: 'idle',
           phase: 'idle',

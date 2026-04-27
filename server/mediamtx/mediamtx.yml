@@ -1,6 +1,30 @@
-# LiveBridge - MediaMTX config otimizado para menor latência
+# LiveBridge - MediaMTX (HLS 10s — menos pedidos HTTP/seg que segmentos curtos; DVR 8h)
 
-logLevel: info
+logLevel: warn
+
+# Control API — usada por GET /api/live/transmissoes (só rede Docker; não expor 9997 na internet)
+api: yes
+apiAddress: :9997
+
+# Prometheus (rede Docker; não mapear 9998 no host). Ver docker-compose.observability.yml
+metrics: yes
+metricsAddress: :9998
+
+# O perfil interno predefinido do MediaMTX só permite action:api a partir de 127.0.0.1.
+# O contentor da API Node contacta o MediaMTX com IP da bridge Docker → 401 sem esta regra.
+# Seguro aqui porque :9997 não está mapeado para o host no docker-compose.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+      - action: metrics
+      - action: pprof
 
 # Desabilitar protocolos não usados
 rtsp: false
@@ -17,14 +41,16 @@ hlsAddress: :8888
 hlsAllowOrigins: ['*']
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-# DVR estilo YouTube: permite voltar ao início da live (8h = 28800 segmentos de 1s)
-hlsSegmentCount: 28800
-hlsSegmentDuration: 1s
+# DVR ~8h: 2880 × 10s = 28800s (10s = menos ficheiros em disco e menos auth_request/nginx por minuto)
+hlsSegmentCount: 2880
+hlsSegmentDuration: 10s
 hlsSegmentMaxSize: 50M
 hlsDirectory: /hls
 
 # Path para rtmp://IP:1935/live/QUALQUERNOME
-# Variantes ABR (_1080/_720/_480): só republicação do transcode-abr.sh — sem gravar de novo.
+# Variantes ABR: transcode-abr.sh. record: no aqui — gravar 3× em paralelo no mesmo fluxo que já faz HLS + x264
+# causava [recorder] detected drift em loop, I/O e CPU a mais → "reader is too slow", Broken pipe e 404 no HLS.
+# Gravação para merge/lesson-boundary fica só no ingest em live/<stream> (abaixo); o merge gera 1080/720/480 por encode.
 paths:
   "~^live/.+_(1080|720|480)$":
     source: publisher

@@ -1,10 +1,15 @@
 import jwt from 'jsonwebtoken';
 import * as cfg from '../config.js';
 
+const jwtVerifyOpts = () => ({
+  algorithms: ['HS256'],
+  clockTolerance: cfg.JWT_CLOCK_TOLERANCE_SECONDS
+});
+
 export function verifyVideoToken(token) {
   if (!cfg.VIDEO_ACCESS_SECRET || !token) return null;
   try {
-    const payload = jwt.verify(token, cfg.VIDEO_ACCESS_SECRET, { algorithms: ['HS256'] });
+    const payload = jwt.verify(token, cfg.VIDEO_ACCESS_SECRET, jwtVerifyOpts());
     if (!payload.path || !payload.session) return null;
     return payload;
   } catch (e) {
@@ -16,7 +21,7 @@ export function verifyVideoToken(token) {
 export function verifyLiveToken(token) {
   if (!cfg.VIDEO_ACCESS_SECRET || !token) return null;
   try {
-    const payload = jwt.verify(token, cfg.VIDEO_ACCESS_SECRET, { algorithms: ['HS256'] });
+    const payload = jwt.verify(token, cfg.VIDEO_ACCESS_SECRET, jwtVerifyOpts());
     if (!payload.streamName) return null;
     return payload;
   } catch {

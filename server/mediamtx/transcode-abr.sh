@@ -8,28 +8,38 @@ INPUT="rtmp://127.0.0.1:1935/${MTX_PATH}"
 OUT108="${MTX_PATH}_1080"
 OUT720="${MTX_PATH}_720"
 OUT480="${MTX_PATH}_480"
+# ultrafast < superfast < veryfast em custo CPU — usar o MESMO preset nas 3 saídas (720 estava veryfast e agravava "reader is too slow").
+PRESET="${TRANSCODE_PRESET:-superfast}"
+# Alinhar GOP à duração do segmento HLS (mediamtx hlsSegmentDuration) — menos trabalho do encoder e cortes limpos nos .ts
+HLS_GOP_SEC="${HLS_GOP_SEC:-10}"
+# Fila na entrada RTMP: quanto maior, mais margem antes de "reader is too slow" (3× x264 em paralelo).
+THREAD_Q="${FFMPEG_THREAD_QUEUE_SIZE:-4096}"
+# Menos B-frames / latência → menos "reordered frames" e erros DTS no muxer HLS do MediaMTX (ver logs [HLS] muxer).
+# Override: X264_LIVE_OPTS="-tune zerolatency -bf 0"
+X264_LIVE_OPTS=${X264_LIVE_OPTS:-"-tune zerolatency -bf 0 -refs 1"}
 
 exec ffmpeg -hide_banner -loglevel warning \
+  -thread_queue_size "$THREAD_Q" \
   -i "$INPUT" \
   -filter_complex "[0:v]split=3[v0][v1][v2];[v0]scale=-2:1080[vout0];[v1]scale=-2:720[vout1];[v2]scale=-2:480[vout2]" \
   -map "[vout0]" -map "0:a?" \
-  -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+  -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 4500k -maxrate 4500k -bufsize 9000k \
-  -force_key_frames "expr:gte(t,n_forced*1)" \
+  -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
   -c:a aac -b:a 128k -ar 44100 \
-  -max_muxing_queue_size 1024 \
+  -max_muxing_queue_size 4096 \
   -f flv "rtmp://127.0.0.1:1935/${OUT108}" \
   -map "[vout1]" -map "0:a?" \
-  -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+  -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 2800k -maxrate 2800k -bufsize 5600k \
-  -force_key_frames "expr:gte(t,n_forced*1)" \
+  -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
   -c:a aac -b:a 128k -ar 44100 \
-  -max_muxing_queue_size 1024 \
+  -max_muxing_queue_size 4096 \
   -f flv "rtmp://127.0.0.1:1935/${OUT720}" \
   -map "[vout2]" -map "0:a?" \
-  -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+  -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 1200k -maxrate 1200k -bufsize 2400k \
-  -force_key_frames "expr:gte(t,n_forced*1)" \
+  -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
   -c:a aac -b:a 128k -ar 44100 \
-  -max_muxing_queue_size 1024 \
+  -max_muxing_queue_size 4096 \
   -f flv "rtmp://127.0.0.1:1935/${OUT480}"

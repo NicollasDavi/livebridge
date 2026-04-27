@@ -7,6 +7,6 @@ export function setVideoAccessCookie(res) {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: cfg.VIDEO_ACCESS_MAX_AGE
+    maxAge: cfg.VIDEO_ACCESS_MAX_AGE_MS
   });
 }

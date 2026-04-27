@@ -1,0 +1,84 @@
+# Observabilidade opcional (Prometheus, Grafana, exporters).
+# Comando: docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+# A API usa CLUSTER_WORKERS=1 e PROMETHEUS_METRICS=1 para /metrics coerentes.
+# Grafana: http://HOST:3001 (definir GRAFANA_ADMIN_PASSWORD no .env do servidor).
+
+services:
+  api:
+    environment:
+      CLUSTER_WORKERS: '1'
+      PROMETHEUS_METRICS: '1'
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: livebridge-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: livebridge-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: '%(protocol)s://%(domain)s:%(http_port)s/'
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - '3001:3000'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: livebridge-cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: livebridge-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: livebridge-blackbox
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.0
+    container_name: livebridge-nginx-exporter
+    restart: unless-stopped
+    command:
+      - -nginx.scrape-uri=http://nginx:8080/internal/nginx_status
+
+volumes:
+  grafana-data:

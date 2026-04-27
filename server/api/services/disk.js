@@ -22,23 +22,38 @@ export function getBoundariesFile(streamName) {
   return join(cfg.BOUNDARIES_DIR, `${safe}.json`);
 }
 
-export function readLastBoundary(streamName) {
+/** Estado de cortes entre aulas (base + variantes ABR gravadas no MediaMTX). */
+export function readBoundaryState(streamName) {
   try {
     const fp = getBoundariesFile(streamName);
-    if (!existsSync(fp)) return null;
+    if (!existsSync(fp)) return { lastIncludedTs: null, lastIncludedByVariant: null };
     const raw = readFileSync(fp, 'utf8');
     const data = JSON.parse(raw);
-    return data.lastIncludedTs || null;
+    const v = data.lastIncludedByVariant;
+    return {
+      lastIncludedTs: data.lastIncludedTs || null,
+      lastIncludedByVariant:
+        v && typeof v === 'object' && !Array.isArray(v)
+          ? { ...v }
+          : null
+    };
   } catch {
-    return null;
+    return { lastIncludedTs: null, lastIncludedByVariant: null };
   }
 }
 
-export function writeLastBoundary(streamName, lastTsFile) {
+export function writeBoundaryState(streamName, { lastIncludedTs, lastIncludedByVariant }) {
   try {
     if (!existsSync(cfg.BOUNDARIES_DIR)) mkdirSync(cfg.BOUNDARIES_DIR, { recursive: true });
     const fp = getBoundariesFile(streamName);
-    writeFileSync(fp, JSON.stringify({ lastIncludedTs: lastTsFile, updatedAt: new Date().toISOString() }));
+    writeFileSync(
+      fp,
+      JSON.stringify({
+        lastIncludedTs,
+        lastIncludedByVariant: lastIncludedByVariant && typeof lastIncludedByVariant === 'object' ? lastIncludedByVariant : {},
+        updatedAt: new Date().toISOString()
+      })
+    );
   } catch (e) {
     console.warn('[API] Erro ao gravar boundary:', e?.message);
   }
@@ -128,7 +143,7 @@ export function discoverCurrentSession(streamName) {
   }
   const entries = readdirSync(fullPath, { withFileTypes: true });
   const dirs = entries
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && !/_aula$/i.test(e.name) && !e.name.startsWith('_w_'))
     .map((e) => ({ name: e.name, mtime: statSync(join(fullPath, e.name)).mtime }))
     .sort((a, b) => b.mtime - a.mtime);
   if (!dirs[0]) return null;
@@ -156,7 +171,7 @@ export async function discoverCurrentSessionAsync(streamName) {
   }
   const dirents = await readdir(fullPath, { withFileTypes: true });
   const dirs = dirents
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && !/_aula$/i.test(e.name) && !e.name.startsWith('_w_'))
     .map((e) => ({ name: e.name, p: join(fullPath, e.name) }));
   const withMtime = await Promise.all(
     dirs.map(async (d) => ({ name: d.name, mtime: (await stat(d.p)).mtime }))

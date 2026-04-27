@@ -19,6 +19,18 @@ function extractLessonsArray(data) {
   return [];
 }
 
+/**
+ * 401/403 ao contactar a API Java em /api/lessons — quase sempre token desalinhado.
+ */
+export function logLessonsApiAuthFailure(status, url, context = '') {
+  if (status !== 401 && status !== 403) return;
+  const ctx = context ? ` [${context}]` : '';
+  console.warn(
+    `[API] Lessons/Java ${status} em ${url}${ctx}. ` +
+      'Defina o MESMO segredo em API_ACCESS_TOKEN (API Java → api.access.token) e LESSONS_API_TOKEN (LiveBridge).'
+  );
+}
+
 export async function fetchLessons() {
   if (!cfg.hasLessonsApi) return [];
   const now = Date.now();
@@ -31,7 +43,9 @@ export async function fetchLessons() {
     const res = await fetch(`${cfg.LESSONS_API_URL}/api/lessons`, { headers: lessonsHeaders, signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) {
-      console.warn('[API] Lessons API respondeu', res.status, res.statusText);
+      const url = `${cfg.LESSONS_API_URL}/api/lessons`;
+      console.warn('[API] Lessons API respondeu', res.status, res.statusText, url);
+      logLessonsApiAuthFailure(res.status, url, 'GET fetchLessons');
       return lessonsCache.data || [];
     }
     const raw = await res.json();
@@ -54,8 +68,12 @@ export async function fetchLessons() {
 export async function fetchDistinct(field) {
   if (!cfg.hasLessonsApi) return [];
   try {
-    const res = await fetch(`${cfg.LESSONS_API_URL}/api/lessons/distinct/${field}`, { headers: lessonsHeaders });
-    if (!res.ok) return [];
+    const url = `${cfg.LESSONS_API_URL}/api/lessons/distinct/${field}`;
+    const res = await fetch(url, { headers: lessonsHeaders });
+    if (!res.ok) {
+      logLessonsApiAuthFailure(res.status, url, `GET distinct/${field}`);
+      return [];
+    }
     const arr = await res.json();
     return Array.isArray(arr) ? arr.map((n) => ({ nome: n })) : [];
   } catch (e) {
