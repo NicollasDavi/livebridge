@@ -1,0 +1,22 @@
+# Sem webhook real por defeito: os envios para 127.0.0.1:1 falham (esperado). Os alertas ficam
+# no estado [firing] na UI (http://host:9093) e podes trocar o destino (Slack,PagerDuty) mais tarde.
+
+global:
+  resolve_timeout: 5m
+  http_config:
+    follow_redirects: true
+
+route:
+  group_by: ["alertname", "instance"]
+  group_wait: 20s
+  group_interval: 1m
+  repeat_interval: 2h
+  receiver: no_op
+
+receivers:
+  - name: no_op
+    webhook_configs:
+      - url: "http://127.0.0.1:1/alert"
+        send_resolved: true
+
+inhibit_rules: []

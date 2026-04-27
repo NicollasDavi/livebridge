@@ -1,0 +1,195 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "none" } },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "showLegend": true, "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "sum by (container) (count_over_time({container=~\"livebridge-.*\"}[1m]))",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Volume (linhas/min) por contentor (Promtail, livebridge-*)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 18, "w": 12, "x": 0, "y": 6 },
+      "id": 2,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=\"livebridge-api\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "API (livebridge-api)",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 18, "w": 12, "x": 12, "y": 6 },
+      "id": 3,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=\"livebridge-mediamtx\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "MediaMTX (livebridge-mediamtx) — live / RTMP / HLS / FFmpeg ABR",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 12, "w": 8, "x": 0, "y": 24 },
+      "id": 4,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=~\"livebridge-player|livebridge-nginx\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Nginx (tenta livebridge-player — nome exato = container em Docker ps)",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 12, "w": 8, "x": 8, "y": 24 },
+      "id": 5,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=\"livebridge-merge\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Merge (encode pós-aula)",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 12, "w": 8, "x": 16, "y": 24 },
+      "id": 6,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=~\"livebridge-(grafana|prometheus|loki|promtail|node-exporter|blackbox|cadvisor|nginx-exporter)\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Observabilidade (Grafana, Prometheus, Loki, exportadores, …)",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki-livebridge" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 36 },
+      "id": 7,
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki-livebridge" },
+          "editorMode": "code",
+          "expr": "{container=~\"livebridge-.*\"} |~ \"(?i)(err|error|exception|fail|timeout|5[0-9][0-9])\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Todas as stacks: fila err/error/fail/5xx (regex) — afinar o filtro consoante o teu tráfego",
+      "type": "logs"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["livebridge", "loki", "logs"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "LiveBridge — Registos (Loki + Promtail)",
+  "uid": "livebridge-logs",
+  "version": 1
+}

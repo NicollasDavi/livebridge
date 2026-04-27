@@ -1,0 +1,58 @@
+groups:
+  - name: livebridge
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alvo Prometheus inacessível (up=0)"
+          description: "job={{ $labels.job }} instance={{ $labels.instance }}"
+
+      - alert: BlackboxHttpProbeFailing
+        expr: max by (instance) (probe_success) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sonda blackbox a falhar (HTTP 2xx)"
+          description: "Alvo: {{ $labels.instance }} — ver Nginx, merge, rede bridge."
+
+      - alert: MediamtxMetricsGone
+        expr: up{job="mediamtx"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Métricas do MediaMTX inacessíveis"
+          description: "Não estão a chegar dados do scrape mediamtx:9998. Ver o contentor livebridge-mediamtx e o Prometheus."
+
+      - alert: LivebridgeApi5xx
+        expr: sum(rate(http_request_duration_seconds_count{status_class="5xx"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Respostas 5xx na API (taxa de pedidos 5xx > 0 no intervalo de avaliação)"
+          description: "Abre o dashboard de métricas e o Loki (contentor livebridge-api). Ajusta a regra se tiveres ruído."
+
+      - alert: NodeDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.*|overlay",mountpoint="/"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|fuse.*|overlay",mountpoint="/"}) < 0.12
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pouco espaço em disco (/) no host"
+          description: "node_exporter: menos de 12% livre em / — alargar disco ou limpar gravações/artefactos Docker."
+
+      - alert: NodeLoad1HighVsCpus
+        expr: (node_load1) / (count by (instance) (node_cpu_seconds_total{mode="idle"})) > 0.95
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Load1 elevado face ao número de CPUs lógicos"
+          description: "Ajustar a regra ao teu baseline; pico de encode/RTMP/merge comum em streaming."

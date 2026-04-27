@@ -1,13 +1,25 @@
-# Observabilidade opcional (Prometheus, Grafana, exporters).
+# Observabilidade opcional: Prometheus, Grafana, Alertmanager, Loki, Promtail, exporters.
 # Comando: docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 # A API usa CLUSTER_WORKERS=1 e PROMETHEUS_METRICS=1 para /metrics coerentes.
-# Grafana: http://HOST:3001 (definir GRAFANA_ADMIN_PASSWORD no .env do servidor).
+# Grafana: http://HOST:3001; Prometheus: 9090; Alertmanager UI: 127.0.0.1:9093; Loki: só na rede interna.
+# Loki+Promtail: requer Linux com Docker (logs em /var/lib/docker/containers). Não aplica a Docker Desktop Windows da mesma forma.
 
 services:
   api:
     environment:
       CLUSTER_WORKERS: '1'
       PROMETHEUS_METRICS: '1'
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: livebridge-alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - '127.0.0.1:9093:9093'
 
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -17,10 +29,40 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=15d'
       - '--web.enable-lifecycle'
+    depends_on:
+      - alertmanager
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - '9090:9090'
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: livebridge-loki
+    restart: unless-stopped
+    # root evita EACCES no volume anónimo; em produção podes mapear UID 10001 da imagem
+    user: root
+    depends_on:
+      - alertmanager
+    command:
+      - -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - loki-data:/loki
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: livebridge-promtail
+    restart: unless-stopped
+    user: root
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    depends_on:
+      - loki
+    volumes:
+      - ./loki/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   grafana:
     image: grafana/grafana:11.3.0
@@ -28,6 +70,7 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+      - loki
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: 'false'
@@ -84,3 +127,4 @@ services:
 
 volumes:
   grafana-data:
+  loki-data:
