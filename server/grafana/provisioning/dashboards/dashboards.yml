@@ -1,3 +1,4 @@
+# Dashboards .json no diretório montado em /etc/grafana/dashboards (ver docker-compose.observability.yml)
 apiVersion: 1
 
 providers:
@@ -7,5 +8,6 @@ providers:
     type: file
     disableDeletion: false
     allowUiUpdates: true
+    updateIntervalSeconds: 30
     options:
       path: /etc/grafana/dashboards

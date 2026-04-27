@@ -31,6 +31,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-info}
       GF_SERVER_ROOT_URL: '%(protocol)s://%(domain)s:%(http_port)s/'
     volumes:
       - grafana-data:/var/lib/grafana
