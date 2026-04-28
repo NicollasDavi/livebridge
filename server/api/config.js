@@ -18,10 +18,10 @@ export const LIVE_ABR_BANDWIDTH_480 = 1328000;
 
 /**
  * Path absoluto (prefixo) das variantes no master HLS (`GET /api/live/hls-master.m3u8`).
- * Padrão `/api/hls` — mesmo host que `/api/live/hls-master.m3u8` resolve variantes com URL relativa `../hls/...` (Next/BFF em `/api/hls/*`).
- * O nginx expõe também `/hls/*`; para master listar `/hls/live/...` use `LIVE_HLS_PATH_PREFIX=/hls`.
+ * Padrão `/hls` → URLs `/hls/live/<stream>_1080/...` (nginx do LiveBridge).
+ * Se o browser só alcança HLS via proxy (ex. Next em `:3000` com `/api/hls/*` → Java → LB), use `LIVE_HLS_PATH_PREFIX=/api/hls`.
  */
-export const LIVE_HLS_PATH_PREFIX = String(process.env.LIVE_HLS_PATH_PREFIX || '/api/hls').replace(/\/$/, '');
+export const LIVE_HLS_PATH_PREFIX = String(process.env.LIVE_HLS_PATH_PREFIX || '/hls').replace(/\/$/, '');
 
 /**
  * Ficheiro de entrada por variante no master ABR (`GET /api/live/hls-master.m3u8`).

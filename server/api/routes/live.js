@@ -4,26 +4,6 @@ import { verifyLiveToken, liveTokenMatchesHlsStream } from '../lib/jwtLive.js';
 import { fetchMediaMtxPathsList, listActiveMainLiveStreams } from '../services/mediamtxControl.js';
 import { filterTransmissoesWithHlsReady, isLiveHlsReadyForPlayback } from '../services/liveHlsReady.js';
 
-/** Prefixos permitidos (nginx expõe ambos). Override por proxy: cabeçalho X-Live-Hls-Path-Prefix ou query hlsPathPrefix. */
-const ALLOWED_HLS_PREFIXES = ['/hls', '/api/hls'];
-
-function resolveLiveHlsPathPrefix(req) {
-  const raw =
-    (typeof req.get === 'function' && req.get('x-live-hls-path-prefix')) ||
-    (req.query && (req.query.hlsPathPrefix || req.query.hlsPrefix));
-  const s = raw != null ? String(raw).trim().replace(/\/$/, '') : '';
-  if (s && ALLOWED_HLS_PREFIXES.includes(s)) return s;
-  return cfg.LIVE_HLS_PATH_PREFIX;
-}
-
-/** URLs relativas ao master em `/api/live/hls-master.m3u8` — funcionam no browser mesmo quando LIVE_HLS_PATH_PREFIX não está no .env (Next em `/api/hls`). */
-function variantPlaylistUrl(pathPrefix, streamName, abrSuffix, playlistFile) {
-  const enc = encodeURIComponent(streamName);
-  const tail = `live/${enc}_${abrSuffix}/${playlistFile}`;
-  if (pathPrefix === '/api/hls') return `../hls/${tail}`;
-  return `../../hls/${tail}`;
-}
-
 const accessOkCache = new Map();
 
 function cacheKeyForAccess(req) {
@@ -139,17 +119,18 @@ export function registerLiveRoutes(app) {
       res.set('Cache-Control', 'no-store');
       return res.status(503).type('text/plain').send('HLS ainda não tem segmentos suficientes\n');
     }
-    const hp = resolveLiveHlsPathPrefix(req);
+    const enc = encodeURIComponent(streamName);
+    const hp = cfg.LIVE_HLS_PATH_PREFIX;
     const pl = cfg.LIVE_HLS_VARIANT_PLAYLIST || 'main_stream.m3u8';
     const body = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
       `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_1080},RESOLUTION=1920x1080,NAME="1080p"`,
-      variantPlaylistUrl(hp, streamName, '1080', pl),
+      `${hp}/live/${enc}_1080/${pl}`,
       `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_720},RESOLUTION=1280x720,NAME="720p"`,
-      variantPlaylistUrl(hp, streamName, '720', pl),
+      `${hp}/live/${enc}_720/${pl}`,
       `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_480},RESOLUTION=854x480,NAME="480p"`,
-      variantPlaylistUrl(hp, streamName, '480', pl),
+      `${hp}/live/${enc}_480/${pl}`,
       ''
     ].join('\n');
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
