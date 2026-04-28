@@ -50,15 +50,23 @@ export const LIVE_HLS_INTERNAL_BASIC_USER = trim(
   process.env.LIVE_HLS_INTERNAL_BASIC_USER,
   'livebridge_hls_probe'
 );
-export const LIVE_HLS_INTERNAL_BASIC_PASS = String(
-  process.env.LIVE_HLS_INTERNAL_BASIC_PASS ?? 'livebridge_internal_probe_change_me'
-);
+const _liveInternalPassRaw = process.env.LIVE_HLS_INTERNAL_BASIC_PASS;
+export const LIVE_HLS_INTERNAL_BASIC_PASS =
+  _liveInternalPassRaw === undefined ||
+  _liveInternalPassRaw === null ||
+  String(_liveInternalPassRaw).trim() === ''
+    ? 'livebridge_internal_probe_change_me'
+    : String(_liveInternalPassRaw);
 /** Sufixo ABR usado na sonda (ex.: 480 → live/nome_480/main_stream.m3u8). */
 export const LIVE_HLS_PROBE_VARIANT = String(process.env.LIVE_HLS_PROBE_VARIANT || '480').trim() || '480';
-/** Mínimo de `#EXTINF` na playlist para considerar a live “pronta” (3 = só após o 3.º segmento). 0 = desliga o critério. */
+/**
+ * Mínimo de `#EXTINF` na playlist para filtrar GET /api/live/transmissoes (só quando > 0).
+ * Padrão 0 = lista tudo o que o MediaMTX reporta como live principal no ar (sem sonda HLS).
+ * Produção “estrita”: LIVE_READY_MIN_SEGMENTS=3 (exige probe + playlist).
+ */
 export const LIVE_READY_MIN_SEGMENTS = Math.max(
   0,
-  parseInt(process.env.LIVE_READY_MIN_SEGMENTS || '3', 10) || 0
+  parseInt(process.env.LIVE_READY_MIN_SEGMENTS || '0', 10) || 0
 );
 export const LIVE_HLS_PROBE_TIMEOUT_MS = Math.min(
   30000,

@@ -24,7 +24,7 @@ function countExtinfSegments(m3u8Text) {
 
 /**
  * True quando a playlist de média da variante de sonda tem segmentos >= LIVE_READY_MIN_SEGMENTS.
- * Omissão: 3 — só “disponível” quando já existem 3 segmentos (reprodução segura ~2 atrás da borda).
+ * Com LIVE_READY_MIN_SEGMENTS=0 (padrão) esta função não é usada pelo filtro de transmissoes.
  */
 export async function isLiveHlsReadyForPlayback(streamName) {
   const min = cfg.LIVE_READY_MIN_SEGMENTS;
