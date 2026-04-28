@@ -93,8 +93,8 @@ services:
       MEDIAMTX_PATHS_CACHE_MS: ${MEDIAMTX_PATHS_CACHE_MS:-3000}
       LESSON_BOUNDARY_MERGE_DELAY_MS: ${LESSON_BOUNDARY_MERGE_DELAY_MS:-8000}
       LESSON_BOUNDARY_LINK_CONCURRENCY: ${LESSON_BOUNDARY_LINK_CONCURRENCY:-12}
-      # Master HLS: prefixo das URLs das variantes. /api/hls se o front (Next) só proxy HLS sob /api/hls/*
-      LIVE_HLS_PATH_PREFIX: ${LIVE_HLS_PATH_PREFIX:-/hls}
+      # Master HLS: variantes em /api/hls (default, alinha Next/BFF). Para paths absolutos /hls no M3U8: LIVE_HLS_PATH_PREFIX=/hls
+      LIVE_HLS_PATH_PREFIX: ${LIVE_HLS_PATH_PREFIX:-/api/hls}
       LIVE_HLS_VARIANT_PLAYLIST: ${LIVE_HLS_VARIANT_PLAYLIST:-main_stream.m3u8}
       # JSON: URLs absolutas para o browser usar o BFF (Spring em :8080). Vazio no .env = só paths relativos.
       API_PUBLIC_BASE_URL: ${API_PUBLIC_BASE_URL:-http://localhost:8080}
