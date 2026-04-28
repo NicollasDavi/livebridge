@@ -36,10 +36,14 @@ const _liveVariantPl = String(process.env.LIVE_HLS_VARIANT_PLAYLIST || 'main_str
 export const LIVE_HLS_VARIANT_PLAYLIST = _liveVariantPl || 'main_stream.m3u8';
 
 /**
- * Base interna (só API → MediaMTX) para contar segmentos HLS antes de expor a live.
- * Docker: http://mediamtx:8888 — sem passar pelo nginx/JWT.
+ * Base interna (só API → nginx → MediaMTX) para contar segmentos HLS antes de expor a live.
+ * Por defeito o nginx expõe /internal/livebridge-hls-probe/ na :8080 (rede Docker) sem auth — evita 401 no
+ * fetch ao pedir playlist direto a http://mediamtx:8888 quando há authMethod internal + Basic no MediaMTX.
  */
-export const LIVE_HLS_INTERNAL_BASE_URL = trim(process.env.LIVE_HLS_INTERNAL_BASE_URL, 'http://mediamtx:8888');
+export const LIVE_HLS_INTERNAL_BASE_URL = trim(
+  process.env.LIVE_HLS_INTERNAL_BASE_URL,
+  'http://nginx:8080/internal/livebridge-hls-probe'
+).replace(/\/$/, '');
 /** Sufixo ABR usado na sonda (ex.: 480 → live/nome_480/main_stream.m3u8). */
 export const LIVE_HLS_PROBE_VARIANT = String(process.env.LIVE_HLS_PROBE_VARIANT || '480').trim() || '480';
 /** Mínimo de `#EXTINF` na playlist para considerar a live “pronta” (3 = só após o 3.º segmento). 0 = desliga o critério. */
