@@ -15,6 +15,13 @@ metricsAddress: :9998
 # Seguro aqui porque :9997 não está mapeado para o host no docker-compose.
 authMethod: internal
 authInternalUsers:
+  # HTTP Basic para o probe da API (playlist HLS interna). Alinhar com LIVE_HLS_INTERNAL_BASIC_* na API.
+  - user: livebridge_hls_probe
+    pass: livebridge_internal_probe_change_me
+    ips: []
+    permissions:
+      - action: read
+      - action: playback
   - user: any
     pass:
     ips: []

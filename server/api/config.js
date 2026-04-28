@@ -44,6 +44,15 @@ export const LIVE_HLS_INTERNAL_BASE_URL = trim(
   process.env.LIVE_HLS_INTERNAL_BASE_URL,
   'http://nginx:8080/internal/livebridge-hls-probe'
 ).replace(/\/$/, '');
+
+/** Basic Auth para o probe HLS (MediaMTX authMethod internal). Deve coincidir com authInternalUsers em mediamtx.yml. */
+export const LIVE_HLS_INTERNAL_BASIC_USER = trim(
+  process.env.LIVE_HLS_INTERNAL_BASIC_USER,
+  'livebridge_hls_probe'
+);
+export const LIVE_HLS_INTERNAL_BASIC_PASS = String(
+  process.env.LIVE_HLS_INTERNAL_BASIC_PASS ?? 'livebridge_internal_probe_change_me'
+);
 /** Sufixo ABR usado na sonda (ex.: 480 → live/nome_480/main_stream.m3u8). */
 export const LIVE_HLS_PROBE_VARIANT = String(process.env.LIVE_HLS_PROBE_VARIANT || '480').trim() || '480';
 /** Mínimo de `#EXTINF` na playlist para considerar a live “pronta” (3 = só após o 3.º segmento). 0 = desliga o critério. */

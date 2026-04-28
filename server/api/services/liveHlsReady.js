@@ -1,4 +1,14 @@
+import { Buffer } from 'node:buffer';
+
 import * as cfg from '../config.js';
+
+function internalProbeHeaders() {
+  const u = cfg.LIVE_HLS_INTERNAL_BASIC_USER;
+  const p = cfg.LIVE_HLS_INTERNAL_BASIC_PASS;
+  if (!u || p === '') return {};
+  const token = Buffer.from(`${u}:${p}`, 'utf8').toString('base64');
+  return { Authorization: `Basic ${token}` };
+}
 
 /** streamName -> { ok, expires } */
 const readyCache = new Map();
@@ -36,7 +46,7 @@ export async function isLiveHlsReadyForPlayback(streamName) {
   const t = setTimeout(() => ctrl.abort(), cfg.LIVE_HLS_PROBE_TIMEOUT_MS);
   let ok = false;
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetch(url, { signal: ctrl.signal, headers: internalProbeHeaders() });
     if (!res.ok) {
       ok = false;
     } else {
