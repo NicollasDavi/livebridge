@@ -120,7 +120,7 @@ Não expõe API pública ao browser da mesma forma que a API `:3000`; melhorias 
 - Snapshot de variantes com menos `structuredClone` entre ticks.
 - Evitar `existsSync` repetido no diretório `merge-progress` após criação.
 
-Variáveis já documentadas em `README` / `DOCUMENTACAO_TECNICA`: `MERGE_ENCODE_CONCURRENCY`, `MERGE_PROGRESS_THROTTLE_MS`, etc.
+Variáveis já documentadas em `README` / `DOCUMENTACAO_TECNICA`: `MERGE_ENCODE_CONCURRENCY`, `MERGE_PROGRESS_THROTTLE_MS`, `MERGE_RESOLUTIONS`, etc.
 
 ---
 

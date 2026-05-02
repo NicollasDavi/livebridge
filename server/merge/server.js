@@ -54,6 +54,14 @@ const MERGE_SCAN_SUMMARY_INTERVAL_MS = Math.max(
   parseInt(process.env.MERGE_SCAN_SUMMARY_INTERVAL_MS || '0', 10) || 0
 );
 const MERGE_SCAN_SUMMARY = process.env.MERGE_SCAN_SUMMARY !== '0';
+/**
+ * Reduz B-frames no H.264 gerado pelo merge — timestamps DTS/PTS mais simples (menos falhas no demuxer do Chromium).
+ * 1 = usar defaults do libx264 (melhor compressão). 0 = recomendado para playback Web sem remux extra.
+ */
+const MERGE_LIBX264_BF = Math.max(
+  0,
+  Math.min(16, parseInt(process.env.MERGE_LIBX264_BF ?? '0', 10) || 0)
+);
 
 function parseMergeHeights() {
   if (MERGE_RESOLUTIONS_RAW === 'single' || MERGE_RESOLUTIONS_RAW === '0' || MERGE_RESOLUTIONS_RAW === 'false') {
@@ -152,11 +160,21 @@ function clearBoundariesForStream(path) {
   } catch (_) {}
 }
 
+/** Opções de entrada do concat (TS em sequência): regenerar PTS ajuda após segmentos com buracos ou DTS fora de ordem. */
+function concatDemuxerInput(listPath) {
+  return ['-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listPath];
+}
+
+/** Saída MP4: mux estável para browsers (Chromium valida DTS na fila de leitura). */
+function mp4WebMuxTail(outPath) {
+  return ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
+}
+
 /** Args ffmpeg para máxima compactação: HEVC + preset lento ou H.264 equivalente */
 function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
   const targetHeight = opts.targetHeight;
-  const tail = ['-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
-  const base = ['-y', '-threads', '0', '-f', 'concat', '-safe', '0', '-i', listPath];
+  const tail = mp4WebMuxTail(outPath);
+  const base = ['-y', '-threads', '0', ...concatDemuxerInput(listPath)];
   if (targetHeight != null && Number.isFinite(targetHeight)) {
     // 16:9 @ 480px altura → 854×480; scale=-2:480 pode dar 853 (ímpar). 4:2:0 exige pares → force_divisible_by=2
     base.push(
@@ -173,6 +191,7 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
       '-crf', String(COMPRESS_CRF_H265),
       '-preset', COMPRESS_PRESET,
       '-tag:v', 'hvc1',
+      '-x265-params', 'bframes=0',
       ...audio,
       ...tail
     ];
@@ -183,6 +202,7 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
     '-crf', String(COMPRESS_CRF_H264),
     '-preset', COMPRESS_PRESET,
     '-tune', 'animation',
+    '-bf', String(MERGE_LIBX264_BF),
     ...audio,
     ...tail
   ];
@@ -191,8 +211,8 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
 /** Segunda tentativa (H.264 + preset médio) se o HEVC falhar — mantém a mesma altura (ex. 480p obrigatório). */
 function buildFallbackH264Args(listPath, outPath, opts = {}) {
   const targetHeight = opts.targetHeight;
-  const tail = ['-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
-  const base = ['-y', '-threads', '0', '-f', 'concat', '-safe', '0', '-i', listPath];
+  const tail = mp4WebMuxTail(outPath);
+  const base = ['-y', '-threads', '0', ...concatDemuxerInput(listPath)];
   if (targetHeight != null && Number.isFinite(targetHeight)) {
     base.push(
       '-vf',
@@ -206,6 +226,7 @@ function buildFallbackH264Args(listPath, outPath, opts = {}) {
     '-crf', String(Math.min(COMPRESS_CRF_H264 + 2, 28)),
     '-preset', 'medium',
     '-tune', 'animation',
+    '-bf', String(MERGE_LIBX264_BF),
     ...audio,
     ...tail
   ];
@@ -710,8 +731,20 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
 
   const ffmpegArgs = COMPRESS_VIDEO
     ? buildCompressFfmpegArgs(listPath, outPath, {})
-    : ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy',
-      '-progress', 'pipe:1', '-nostats', outPath];
+    : [
+        '-y',
+        ...concatDemuxerInput(listPath),
+        '-c',
+        'copy',
+        '-avoid_negative_ts',
+        'make_zero',
+        '-movflags',
+        '+faststart',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        outPath
+      ];
 
   try {
     await new Promise((resolve, reject) => {

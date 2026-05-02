@@ -1,5 +1,7 @@
 # API Java — "Aula acabou"
 
+> **Rotas e JSON:** [**`API_JAVA_ROTAS_E_AGENTE.md`**](API_JAVA_ROTAS_E_AGENTE.md) (§2).
+
 O que a API Java precisa fazer: **chamar** o LiveBridge. Existem duas rotas:
 
 | Rota | Quando usar |

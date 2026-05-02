@@ -21,36 +21,30 @@ docker compose up -d
 
 ### Publicar (OBS)
 
-- **Servidor:** `rtmp://SEU_IP:1935/live`
+- **Servidor:** `rtmp://SEU_IP:80/live` (no host a porta **80** é RTMP; dentro do contentor o MediaMTX continua na **1935**)
 - **Chave:** qualquer nome (ex: `teste`)
 
 ### Assistir
 
-- **API/HLS:** `http://localhost:8081` (ou `http://SEU_IP:8081`)
+- **API/HLS (HTTPS):** `https://SEU_IP/` (porta **443**)
+- **Só na VM:** `http://127.0.0.1:8081` (nginx HTTP interno; não está exposto na internet)
 - O frontend foi removido. Use seu próprio frontend e integre via `docs/Frontend-Externo.md`
 
-## Portas
+## Portas (padrão atual do `docker-compose.yml`)
 
-| Porta  | Uso              |
-|--------|------------------|
-| 1935   | RTMP (OBS)       |
-| 3000   | API (gravações)  |
-| 8082   | Merge (concatena vídeos) |
-| 8081   | API + HLS (Nginx)|
-| 8888   | HLS              |
+| Porta (host) | Uso |
+|--------------|-----|
+| **80** | RTMP (OBS → MediaMTX) |
+| **443** | HTTPS — site, `/api/*`, HLS via nginx |
+| **127.0.0.1:8081** | HTTP nginx (só localhost) |
+| **127.0.0.1:8082** | Merge (só localhost; a API usa a rede Docker) |
+| **3000** | API — só rede Docker, não publicada no host |
+| **8888** | HLS MediaMTX — só rede Docker |
 
-## Firewall (Hostinger VPS)
+## Firewall
 
-Se o OBS der **"conexão expirou"**, libere as portas no **hPanel → VPS → Firewall**:
-
-| Porta | Protocolo | Uso        |
-|-------|-----------|------------|
-| 1935  | TCP       | RTMP (OBS) |
-| 8081  | TCP       | API/HLS    |
-| 8888  | TCP       | HLS        |
-| 3000  | TCP       | API        |
-
-Regra: **Accept** → **TCP** → **Porta** → **Anywhere**
+Para **só 80 e 443** na internet: **TCP 80** (RTMP) e **TCP 443** (HTTPS).  
+Algumas redes corporativas inspecionam a **80** e podem interferir com RTMP; nesse caso é preciso outra estratégia (ex.: ingest noutro endpoint).
 
 ## OBS — configuração para transmissão de aula
 

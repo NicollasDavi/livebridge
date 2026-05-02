@@ -1,5 +1,9 @@
 # API para Frontend — Integração de Vídeo
 
+> **Catálogo de rotas + spec para implementar a API Java:** [**`API_JAVA_ROTAS_E_AGENTE.md`**](API_JAVA_ROTAS_E_AGENTE.md).
+
+O texto abaixo é complementar; prevalece o catálogo acima.
+
 Documentação para o frontend obter a URL do vídeo. A listagem de aulas é feita pela API Java.
 
 **Segurança:** Com `VIDEO_ACCESS_SECRET` configurado, vídeo e live exigem token JWT obtido do Java (usuário autenticado via cookie httpOnly).

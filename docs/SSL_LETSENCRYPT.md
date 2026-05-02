@@ -10,11 +10,32 @@ Já configurado. Acesse: **https://localhost:443** ou **https://IP-DO-SERVIDOR:4
 
 O navegador mostrará aviso de segurança (certificado não confiável) — clique em "Avançado" → "Continuar" para prosseguir.
 
-**Regenerar certificado** (válido por 1 ano):
+**Regenerar certificado** (autoassinado, ~825 dias):
+
+Sem SAN extra (só `localhost` — desenvolvimento):
+
 ```bash
 cd server
+chmod +x scripts/generate-self-signed-cert.sh
 ./scripts/generate-self-signed-cert.sh
 docker compose restart nginx
+```
+
+Com **IP público no SAN** (obrigatório se clientes HTTPS ligam a `https://IP` — ex.: Java `HttpsURLConnection` / PKIX com verificação de hostname):
+
+```bash
+cd server
+./scripts/generate-self-signed-cert.sh SEU_IP_PUBLICO
+docker compose restart nginx
+openssl x509 -in certs/fullchain.pem -noout -text | grep -A2 'Subject Alternative Name'
+```
+
+Deves ver `IP Address:SEU_IP_PUBLICO` e `DNS:localhost`. Volta a exportar o novo certificado para o truststore dos clientes que confiam no LiveBridge.
+
+Opcional (IP + domínio extra no SAN):
+
+```bash
+./scripts/generate-self-signed-cert.sh SEU_IP_PUBLICO live.seudominio.com
 ```
 
 ---

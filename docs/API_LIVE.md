@@ -1,6 +1,10 @@
 # API LiveBridge — Live (HLS)
 
+> **Rotas Java ↔ LiveBridge:** [**`API_JAVA_ROTAS_E_AGENTE.md`**](API_JAVA_ROTAS_E_AGENTE.md). Este ficheiro detalha rotas LiveBridge e troubleshooting de proxy.
+
 Documentação das rotas de transmissão ao vivo.
+
+**ABR / proxy HLS:** ver §1 e §4 em `API_JAVA_ROTAS_E_AGENTE.md`.
 
 ---
 

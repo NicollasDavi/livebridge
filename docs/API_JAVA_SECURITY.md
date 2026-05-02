@@ -1,5 +1,7 @@
 # API Java — Endpoints de Segurança para Vídeo
 
+> **JWT (contratos):** [**`API_JAVA_ROTAS_E_AGENTE.md`**](API_JAVA_ROTAS_E_AGENTE.md) (§3).
+
 Implementação dos endpoints que o LiveBridge espera para validar acesso a gravações e live.
 
 ---
