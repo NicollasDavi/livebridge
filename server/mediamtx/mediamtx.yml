@@ -10,21 +10,11 @@ apiAddress: :9997
 metrics: yes
 metricsAddress: :9998
 
-# O perfil interno predefinido do MediaMTX só permite action:api a partir de 127.0.0.1.
-# O contentor da API Node contacta o MediaMTX com IP da bridge Docker → 401 sem esta regra.
-# Seguro aqui porque :9997 não está mapeado para o host no docker-compose.
+# Auth “aberta” só na rede Docker — :8888 (HLS) e :9997 (API) não estão expostos no host.
+# O acesso público à live é só via nginx (:443) com JWT (auth_request). Isto evita 401 no MTX
+# por Basic mal alinhado entre versões; ver discussões upstream sobre internal + path.
 authMethod: internal
 authInternalUsers:
-  # HTTP Basic para o probe da API (playlist HLS interna). Alinhar com LIVE_HLS_INTERNAL_BASIC_* na API.
-  - user: livebridge_hls_probe
-    pass: livebridge_internal_probe_change_me
-    ips: []
-    permissions:
-      # path vazio = qualquer path (obrigatório em versões recentes; sem isto o HLS pode dar 401)
-      - action: read
-        path:
-      - action: playback
-        path:
   - user: any
     pass:
     ips: []

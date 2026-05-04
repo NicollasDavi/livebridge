@@ -37,25 +37,22 @@ export const LIVE_HLS_VARIANT_PLAYLIST = _liveVariantPl || 'main_stream.m3u8';
 
 /**
  * Base interna (só API → nginx → MediaMTX) para contar segmentos HLS antes de expor a live.
- * Por defeito o nginx expõe /internal/livebridge-hls-probe/ na :8080 (rede Docker) sem auth — evita 401 no
- * fetch ao pedir playlist direto a http://mediamtx:8888 quando há authMethod internal + Basic no MediaMTX.
+ * Por defeito o nginx expõe /internal/livebridge-hls-probe/ na :8080 (rede Docker).
+ * MediaMTX na rede interna usa utilizador `any` sem Basic; só definir LIVE_HLS_INTERNAL_BASIC_* se voltares a exigir Basic no MTX.
  */
 export const LIVE_HLS_INTERNAL_BASE_URL = trim(
   process.env.LIVE_HLS_INTERNAL_BASE_URL,
   'http://nginx:8080/internal/livebridge-hls-probe'
 ).replace(/\/$/, '');
 
-/** Basic Auth para o probe HLS (MediaMTX authMethod internal). Deve coincidir com authInternalUsers em mediamtx.yml. */
-export const LIVE_HLS_INTERNAL_BASIC_USER = trim(
-  process.env.LIVE_HLS_INTERNAL_BASIC_USER,
-  'livebridge_hls_probe'
-);
+/** Opcional: Basic só se ambos USER e PASS estiverem definidos (ver liveHlsReady internalProbeHeaders). */
+export const LIVE_HLS_INTERNAL_BASIC_USER = trim(process.env.LIVE_HLS_INTERNAL_BASIC_USER, '');
 const _liveInternalPassRaw = process.env.LIVE_HLS_INTERNAL_BASIC_PASS;
 export const LIVE_HLS_INTERNAL_BASIC_PASS =
   _liveInternalPassRaw === undefined ||
   _liveInternalPassRaw === null ||
   String(_liveInternalPassRaw).trim() === ''
-    ? 'livebridge_internal_probe_change_me'
+    ? ''
     : String(_liveInternalPassRaw);
 /** Sufixo ABR usado na sonda (ex.: 480 → live/nome_480/main_stream.m3u8). */
 export const LIVE_HLS_PROBE_VARIANT = String(process.env.LIVE_HLS_PROBE_VARIANT || '480').trim() || '480';
