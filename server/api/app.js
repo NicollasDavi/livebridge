@@ -7,11 +7,13 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerLiveRoutes } from './routes/live.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
+import { registerMediaMtxHttpAuth } from './routes/mediamtxHttpAuth.js';
 import { setupPrometheusMetrics } from './middleware/metricsHttp.js';
 import { hasR2 } from './r2.js';
 
 export function createApp() {
   const app = express();
+  registerMediaMtxHttpAuth(app);
   app.use(compression({ threshold: 1024 }));
   app.use(
     cors({
@@ -42,6 +44,7 @@ export function createApp() {
       path === '/api/ready' ||
       path === '/metrics' ||
       path === '/api/check-video-access' ||
+      path === '/api/internal/mediamtx-auth' ||
       path.startsWith('/api/recordings/hls/segment');
     if (!noisy || cfg.API_LOG_ALL_REQUESTS) {
       console.log(`[API] ${req.method} ${req.url}`);

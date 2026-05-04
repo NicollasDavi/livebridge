@@ -1,9 +1,12 @@
 services:
   mediamtx:
     # *-ffmpeg: inclui ffmpeg para runOnReady (ABR 1080/720/480 — ver mediamtx.yml)
-    image: bluenviron/mediamtx:latest-ffmpeg
+    # latest-ffmpeg pode mudar comportamento de auth; fixar evita 401 “fantasma” entre deploys
+    image: bluenviron/mediamtx:1.11.3-ffmpeg
     container_name: livebridge-mediamtx
     restart: unless-stopped
+    depends_on:
+      - api
     # Prioridade de CPU quando o contentor merge também corre (FFmpeg pós-aula).
     cpu_shares: 1024
     environment:

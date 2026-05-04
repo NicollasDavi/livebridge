@@ -10,27 +10,18 @@ apiAddress: :9997
 metrics: yes
 metricsAddress: :9998
 
-# Auth “aberta” só na rede Docker — :8888 (HLS) e :9997 (API) não estão expostos no host.
-# O acesso público à live é só via nginx (:443) com JWT (auth_request). Isto evita 401 no MTX
-# por Basic mal alinhado entre versões; ver discussões upstream sobre internal + path.
-authMethod: internal
-authInternalUsers:
-  - user: any
-    pass:
-    ips: []
-    permissions:
-      - action: publish
-        path:
-      - action: read
-        path:
-      - action: playback
-        path:
-      - action: api
-        path:
-      - action: metrics
-        path:
-      - action: pprof
-        path:
+# Sem authInternalUsers — não há “base” de users no MTX.
+# authHTTPExclude: leitura HLS (:8888), Control API (:9997), métricas → não chamam o hook (zero 401 por internal).
+# Só **publish** (RTMP) POSTa para a API; /api/internal/mediamtx-auth responde 200 só a IPs da rede Docker.
+# HLS público: JWT no nginx :443 (externo ao MediaMTX).
+authMethod: http
+authHTTPAddress: http://api:3000/api/internal/mediamtx-auth
+authHTTPExclude:
+  - action: read
+  - action: playback
+  - action: api
+  - action: metrics
+  - action: pprof
 
 # Desabilitar protocolos não usados
 rtsp: false
