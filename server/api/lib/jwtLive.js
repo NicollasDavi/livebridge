@@ -18,6 +18,20 @@ export function verifyVideoToken(token) {
   }
 }
 
+/** JWT para URLs de gravação HLS (`token=` na query). Alinhado a `requireVideoAuth` e ao TTL do cookie vid_ctx. */
+export function signVideoAccessToken(path, session) {
+  if (!cfg.VIDEO_ACCESS_SECRET || !path || !session) return null;
+  try {
+    return jwt.sign(
+      { path, session },
+      cfg.VIDEO_ACCESS_SECRET,
+      { algorithm: 'HS256', expiresIn: cfg.VIDEO_ACCESS_MAX_AGE }
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function verifyLiveToken(token) {
   if (!cfg.VIDEO_ACCESS_SECRET || !token) return null;
   try {

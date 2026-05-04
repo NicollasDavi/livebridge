@@ -23,6 +23,7 @@ import {
 import * as disk from '../services/disk.js';
 import { isMainLiveStreamOnline } from '../services/mediamtxControl.js';
 import { requireR2, requireVideoAuth } from '../middleware/authRecordings.js';
+import { signVideoAccessToken } from '../lib/jwtLive.js';
 
 function enrichRecordingsWithLessons(r2List, lessons) {
   const lessonMap = new Map();
@@ -115,15 +116,21 @@ async function linkOrCopy(src, dest) {
   }
 }
 
+function recordingHlsTokenQuery(path, session) {
+  const t = signVideoAccessToken(path, session);
+  return t ? `&token=${encodeURIComponent(t)}` : '';
+}
+
 function hlsMasterUrlForPartial(req, path, session, tokenQ) {
   const q = `path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}${tokenQ}`;
   return cfg.publicApiUrl(req, `/api/recordings/hls/master.m3u8?${q}`);
 }
 
 function recordingsPlaylistUrl(req, path, session) {
+  const tp = recordingHlsTokenQuery(path, session);
   return cfg.publicApiUrl(
     req,
-    `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`
+    `/api/recordings/hls/playlist.m3u8?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}${tp}`
   );
 }
 
@@ -695,7 +702,7 @@ export function registerRecordingsRoutes(app) {
         mergeProgressUrl: recordingsMergeProgressUrl(req, path, session)
       };
       if (partialAbrHasSegments(partialDir)) {
-        payload.hlsMasterUrl = hlsMasterUrlForPartial(req, path, session, '');
+        payload.hlsMasterUrl = hlsMasterUrlForPartial(req, path, session, recordingHlsTokenQuery(path, session));
       }
       res.json(payload);
 
