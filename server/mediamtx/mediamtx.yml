@@ -35,7 +35,7 @@ rtmpAddress: :1935
 # HLS (com áudio)
 hls: true
 hlsAddress: :8888
-hlsAllowOrigins: ['*']
+hlsAllowOrigin: '*'
 hlsVariant: mpegts
 hlsAlwaysRemux: true
 # DVR ~8h: 2880 × 10s = 28800s (10s = menos ficheiros em disco e menos auth_request/nginx por minuto)
