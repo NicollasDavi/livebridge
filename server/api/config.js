@@ -123,6 +123,15 @@ export const PENDING_READ_CONCURRENCY = Math.min(
   Math.max(1, parseInt(process.env.PENDING_READ_CONCURRENCY || '8', 10) || 8)
 );
 
+/** Limite global de payload JSON da API (evita pressão de memória/CPU por body grande). */
+export const API_JSON_LIMIT = String(process.env.API_JSON_LIMIT || '256kb').trim() || '256kb';
+
+/** Limite de concorrência para sondas de readiness HLS em lote. */
+export const LIVE_READY_CHECK_CONCURRENCY = Math.min(
+  32,
+  Math.max(1, parseInt(process.env.LIVE_READY_CHECK_CONCURRENCY || '8', 10) || 8)
+);
+
 /**
  * Após POST /api/recordings/lesson-boundary: atrasar o arranque do merge (FFmpeg no contentor merge).
  * O merge disputa CPU/disco com o MediaMTX; arranque imediato pode degradar o HLS da live (404, "reader is too slow").

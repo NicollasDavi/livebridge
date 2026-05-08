@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 
 import * as cfg from '../config.js';
+import { mapPool } from '../lib/asyncPool.js';
 
 function internalProbeHeaders() {
   const u = cfg.LIVE_HLS_INTERNAL_BASIC_USER;
@@ -68,11 +69,13 @@ export async function isLiveHlsReadyForPlayback(streamName) {
 export async function filterTransmissoesWithHlsReady(items) {
   if (!Array.isArray(items) || items.length === 0) return items;
   if (cfg.LIVE_READY_MIN_SEGMENTS <= 0) return items;
-  const checks = await Promise.all(
-    items.map(async (it) => ({
+  const checks = await mapPool(
+    items,
+    cfg.LIVE_READY_CHECK_CONCURRENCY,
+    async (it) => ({
       it,
       ok: await isLiveHlsReadyForPlayback(it.streamName)
-    }))
+    })
   );
   return checks.filter((x) => x.ok).map((x) => x.it);
 }

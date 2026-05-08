@@ -8,6 +8,8 @@ Servidor de streaming ao vivo com HLS.
 
 **🔗 [Frontend Externo](docs/Frontend-Externo.md)** — Guia completo para integrar o LiveBridge com seu frontend (Angular, React, Vue, etc.).
 
+**🎬 [Guia Player Front do Zero](docs/GUIA_PLAYER_FRONT_DO_ZERO.md)** — Implementação recomendada de player live + gravações, com fluxo completo e boas práticas.
+
 **⚡ [API — Performance e paginação](docs/API-Integracao-Performance-e-Paginacao.md)** — Logs, `GET /api/recordings?paginate=1`, variáveis de ambiente e impacto na integração.
 
 ## Início rápido

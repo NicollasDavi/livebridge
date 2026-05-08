@@ -26,7 +26,8 @@ import { runBatchedAll } from './lib/asyncPool.js';
 const execFileAsync = promisify(execFile);
 
 const app = express();
-app.use(express.json());
+const API_JSON_LIMIT = (process.env.MERGE_API_JSON_LIMIT || '256kb').trim() || '256kb';
+app.use(express.json({ limit: API_JSON_LIMIT }));
 
 const RECORDINGS_DIR = (process.env.RECORDINGS_DIR || '/recordings').trim();
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID?.trim();
@@ -54,6 +55,17 @@ const MERGE_SCAN_SUMMARY_INTERVAL_MS = Math.max(
   parseInt(process.env.MERGE_SCAN_SUMMARY_INTERVAL_MS || '0', 10) || 0
 );
 const MERGE_SCAN_SUMMARY = process.env.MERGE_SCAN_SUMMARY !== '0';
+const MERGE_SCAN_INTERVAL_MS = Math.max(5000, parseInt(process.env.MERGE_SCAN_INTERVAL_MS || '30000', 10) || 30000);
+const MERGE_MAX_CONCURRENT_JOBS = Math.max(
+  1,
+  Math.min(8, parseInt(process.env.MERGE_MAX_CONCURRENT_JOBS || '2', 10) || 2)
+);
+const R2_UPLOAD_QUEUE_SIZE = Math.max(1, Math.min(8, parseInt(process.env.R2_UPLOAD_QUEUE_SIZE || '4', 10) || 4));
+const R2_UPLOAD_PART_SIZE_MB = Math.max(
+  8,
+  Math.min(256, parseInt(process.env.R2_UPLOAD_PART_SIZE_MB || '64', 10) || 64)
+);
+const R2_UPLOAD_PART_SIZE_BYTES = R2_UPLOAD_PART_SIZE_MB * 1024 * 1024;
 /**
  * Reduz B-frames no H.264 gerado pelo merge — timestamps DTS/PTS mais simples (menos falhas no demuxer do Chromium).
  * 1 = usar defaults do libx264 (melhor compressão). 0 = recomendado para playback Web sem remux extra.
@@ -79,6 +91,16 @@ const s3 = createR2S3Client({
 });
 
 const BOUNDARIES_DIR = join(RECORDINGS_DIR, 'boundaries');
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMs(attempt) {
+  const base = Math.min(60000, 4000 * (2 ** (attempt - 1)));
+  const jitter = Math.round(base * (0.2 + Math.random() * 0.8));
+  return base + jitter;
+}
 
 /** Gravações ABR do MediaMTX em live/<stream>_1080|_720|_480 — não são aulas próprias; merge/upload só em live/<stream> e pastas *_aula. */
 function isMediamtxAbrVariantDir(name) {
@@ -503,8 +525,8 @@ async function mergeAndUploadMulti(
             Body: body,
             ContentType: 'video/mp4'
           },
-          queueSize: 4,
-          partSize: 100 * 1024 * 1024,
+          queueSize: R2_UPLOAD_QUEUE_SIZE,
+          partSize: R2_UPLOAD_PART_SIZE_BYTES,
           leavePartsOnError: false
         });
         await upload.done();
@@ -530,7 +552,7 @@ async function mergeAndUploadMulti(
           removeMergeWorkDir(workDir);
           return { ok: false, reason: 'upload_failed', path, session: sessionName, failedVariant: label };
         }
-        await new Promise((r) => setTimeout(r, attempt * 5000));
+        await sleep(retryDelayMs(attempt));
       }
     }
   }
@@ -902,8 +924,8 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
           Body: body,
           ContentType: 'video/mp4'
         },
-        queueSize: 4,
-        partSize: 100 * 1024 * 1024,
+        queueSize: R2_UPLOAD_QUEUE_SIZE,
+        partSize: R2_UPLOAD_PART_SIZE_BYTES,
         leavePartsOnError: false
       });
       await upload.done();
@@ -947,9 +969,9 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
         uploadPercent: 0
       }, { immediate: true });
       if (attempt < MAX_RETRIES) {
-        const delay = attempt * 5000;
+        const delay = retryDelayMs(attempt);
         console.log(`[merge] Aguardando ${delay / 1000}s antes de tentar novamente...`);
-        await new Promise(r => setTimeout(r, delay));
+        await sleep(delay);
       }
     }
   }
@@ -1053,8 +1075,8 @@ app.post('/merge/upload', async (req, res) => {
           Body: createReadStream(outPath),
           ContentType: 'video/mp4'
         },
-        queueSize: 4,
-        partSize: 100 * 1024 * 1024,
+        queueSize: R2_UPLOAD_QUEUE_SIZE,
+        partSize: R2_UPLOAD_PART_SIZE_BYTES,
         leavePartsOnError: false
       });
       await upload.done();
@@ -1066,7 +1088,7 @@ app.post('/merge/upload', async (req, res) => {
     } catch (e) {
       console.error('[merge/upload] Falhou:', e?.message || e);
       if (attempt < MAX_RETRIES) {
-        await new Promise(r => setTimeout(r, attempt * 5000));
+        await sleep(retryDelayMs(attempt));
       } else {
         return res.status(500).json({ ok: false, error: e?.message || 'upload_failed' });
       }
@@ -1140,11 +1162,42 @@ app.get('/debug', (req, res) => res.json(scanRecordings()));
 
 const STALE_MS = 2 * 60 * 1000;
 const processedDirs = new Set();
+let activeMergeJobs = 0;
+const pendingMergeJobs = [];
+let scanInProgress = false;
 
 let lastScanSummary = '';
 let lastSummaryLogTime = 0;
 let scanCount = 0;
-function findStaleSessions() {
+
+function scheduleMergeJob(key, startedLog, task) {
+  if (processedDirs.has(key)) return;
+  processedDirs.add(key);
+  if (startedLog) console.log(startedLog);
+
+  const run = async () => {
+    activeMergeJobs += 1;
+    try {
+      await task();
+    } finally {
+      processedDirs.delete(key);
+      activeMergeJobs = Math.max(0, activeMergeJobs - 1);
+      const next = pendingMergeJobs.shift();
+      if (next) next();
+    }
+  };
+
+  if (activeMergeJobs < MERGE_MAX_CONCURRENT_JOBS) {
+    run().catch((e) => console.error('[merge] Erro no job agendado:', e?.message || e));
+    return;
+  }
+
+  pendingMergeJobs.push(() => run().catch((e) => console.error('[merge] Erro no job enfileirado:', e?.message || e)));
+}
+
+async function findStaleSessions() {
+  if (scanInProgress) return;
+  scanInProgress = true;
   try {
     scanCount++;
     const pathBase = join(RECORDINGS_DIR, 'live');
@@ -1172,11 +1225,12 @@ function findStaleSessions() {
         if (age >= STALE_MS) {
           const key = streamPath + ':flat';
           if (!processedDirs.has(key)) {
-            processedDirs.add(key);
             console.log('[merge] Stream finalizado (flat):', mtxPath, tsInStream.length, 'segmentos');
-            console.log('[merge] Job iniciado (scan flat):', mtxPath, `(${tsInStream.length} .ts)`);
-            mergeAndUpload(mtxPath).then(async (r) => {
-              processedDirs.delete(key);
+            scheduleMergeJob(
+              key,
+              `[merge] Job iniciado (scan flat): ${mtxPath} (${tsInStream.length} .ts)`,
+              async () => {
+                const r = await mergeAndUpload(mtxPath);
               if (r.ok) {
                 console.log('[merge] Upload OK:', r.key);
                 if (r.path && r.session && MERGE_CALLBACK_URL) {
@@ -1193,10 +1247,8 @@ function findStaleSessions() {
                   })
                 );
               }
-            }).catch(e => {
-              processedDirs.delete(key);
-              console.error('[merge] Erro:', e.message);
-            });
+              }
+            );
           }
         }
       }
@@ -1215,11 +1267,9 @@ function findStaleSessions() {
         const stat = statSync(sessionPath);
         const age = Date.now() - stat.mtimeMs;
         if (age < STALE_MS) continue;
-        processedDirs.add(key);
         console.log('[merge] Sessão finalizada detectada:', mtxPath, sess.name);
-        console.log('[merge] Job iniciado (scan pasta):', mtxPath, sess.name);
-        mergeAndUpload(mtxPath, sess.name).then(async (r) => {
-          processedDirs.delete(key);
+        scheduleMergeJob(key, `[merge] Job iniciado (scan pasta): ${mtxPath} ${sess.name}`, async () => {
+          const r = await mergeAndUpload(mtxPath, sess.name);
           if (r.ok) {
             console.log('[merge] Upload OK:', r.key);
             if (r.path && r.session && MERGE_CALLBACK_URL) await notifyUploadComplete(r.path, r.session, r.variants || null);
@@ -1234,9 +1284,6 @@ function findStaleSessions() {
               })
             );
           }
-        }).catch(e => {
-          processedDirs.delete(key);
-          console.error('[merge] Erro:', e.message);
         });
       }
     }
@@ -1256,16 +1303,28 @@ function findStaleSessions() {
     }
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[merge] scan error', e.message);
+  } finally {
+    scanInProgress = false;
   }
 }
 
-setInterval(findStaleSessions, 30000);
-setTimeout(findStaleSessions, 5000);
+setInterval(() => {
+  findStaleSessions().catch((e) => console.error('[merge] scan loop error', e?.message || e));
+}, MERGE_SCAN_INTERVAL_MS);
+setTimeout(() => {
+  findStaleSessions().catch((e) => console.error('[merge] initial scan error', e?.message || e));
+}, 5000);
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Merge service rodando na porta ${PORT}`);
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
+  console.log(
+    `[merge] Scanner: intervalo ${Math.round(MERGE_SCAN_INTERVAL_MS / 1000)}s, concorrência máxima de jobs ${MERGE_MAX_CONCURRENT_JOBS}`
+  );
+  console.log(
+    `[merge] Upload multipart: queueSize=${R2_UPLOAD_QUEUE_SIZE}, partSize=${R2_UPLOAD_PART_SIZE_MB}MB`
+  );
   const mh = parseMergeHeights();
   if (mh) {
     const encNote =
