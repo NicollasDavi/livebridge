@@ -1,5 +1,5 @@
-# CI no GitHub + CD sem SSH: push de imagens para Artifact Registry + manifesto no GCS.
-# A VM GCP faz pull outbound (git + docker) via timer — ver docs/CI_CD.md.
+# CI no GitHub + publish de imagens para GitHub Container Registry (ghcr.io).
+# Deploy na VM é manual (docker compose pull) — ver docs/CI_CD.md.
 name: CI/CD LiveBridge
 
 on:
@@ -78,7 +78,7 @@ jobs:
           format: gcc
 
   publish:
-    name: Publish images (GCP)
+    name: Publish images (GHCR)
     needs: ci
     if: |
       github.event_name == 'workflow_dispatch' ||
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      packages: write
     concurrency:
       group: publish-livebridge
       cancel-in-progress: false
@@ -94,46 +94,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve image names
         id: images
         run: |
           set -euo pipefail
-          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
-          if [ -z "$PROJECT" ]; then
-            echo "Secret GCP_PROJECT_ID em falta" >&2
-            exit 1
-          fi
-          REGION="${{ vars.GCP_REGION }}"
-          REGION="${REGION:-southamerica-east1}"
-          REPO="${{ vars.ARTIFACT_REGISTRY_REPO }}"
-          REPO="${REPO:-livebridge}"
+          # ghcr.io exige owner/repo em minúsculas
+          OWNER_REPO="$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
           SHA="${GITHUB_SHA}"
           SHORT="${SHA:0:7}"
-          BASE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}"
+          BASE="ghcr.io/${OWNER_REPO}"
           {
-            echo "region=${REGION}"
             echo "api=${BASE}/api:${SHA}"
             echo "api_short=${BASE}/api:${SHORT}"
             echo "api_latest=${BASE}/api:latest"
             echo "merge=${BASE}/merge:${SHA}"
             echo "merge_short=${BASE}/merge:${SHORT}"
             echo "merge_latest=${BASE}/merge:latest"
-            echo "sha=${SHA}"
-            echo "short=${SHORT}"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker "${{ steps.images.outputs.region }}-docker.pkg.dev" --quiet
 
       - name: Build and push API
         working-directory: server/api
@@ -161,40 +145,10 @@ jobs:
           docker push "${{ steps.images.outputs.merge_short }}"
           docker push "${{ steps.images.outputs.merge_latest }}"
 
-      - name: Publish deploy manifest to GCS
-        env:
-          DEPLOY_BUCKET: ${{ secrets.GCS_DEPLOY_BUCKET }}
-          SHA: ${{ steps.images.outputs.sha }}
-          SHORT: ${{ steps.images.outputs.short }}
-          API_IMAGE: ${{ steps.images.outputs.api }}
-          MERGE_IMAGE: ${{ steps.images.outputs.merge }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref }}
+      - name: Summary
         run: |
-          set -euo pipefail
-          if [ -z "${DEPLOY_BUCKET}" ]; then
-            echo "Secret GCS_DEPLOY_BUCKET em falta" >&2
-            exit 1
-          fi
-          BUCKET="${DEPLOY_BUCKET#gs://}"
-          python3 <<'PY'
-          import json, os
-          from datetime import datetime, timezone
-          manifest = {
-            "sha": os.environ["SHA"],
-            "shortSha": os.environ["SHORT"],
-            "apiImage": os.environ["API_IMAGE"],
-            "mergeImage": os.environ["MERGE_IMAGE"],
-            "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "repository": os.environ["REPO"],
-            "ref": os.environ["REF"],
-          }
-          with open("/tmp/deploy-manifest.json", "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-            f.write("\n")
-          with open("/tmp/deploy-sha.txt", "w", encoding="utf-8") as f:
-            f.write(os.environ["SHA"] + "\n")
-          PY
-          gcloud storage cp /tmp/deploy-manifest.json "gs://${BUCKET}/livebridge/deploy-manifest.json"
-          gcloud storage cp /tmp/deploy-sha.txt "gs://${BUCKET}/livebridge/deploy-sha.txt"
-          echo "Manifesto: gs://${BUCKET}/livebridge/deploy-manifest.json"
+          echo "Imagens publicadas:"
+          echo "  API:   ${{ steps.images.outputs.api }}"
+          echo "  Merge: ${{ steps.images.outputs.merge }}"
+          echo "Na VM: configurar API_IMAGE/MERGE_IMAGE no .env, depois:"
+          echo "  git pull && docker compose pull api merge && docker compose up -d"

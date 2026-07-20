@@ -41,7 +41,7 @@ services:
         max-file: "5"
 
   merge:
-    # Local: build. Produção GCP: API_IMAGE/MERGE_IMAGE no .env (Artifact Registry) — ver docs/CI_CD.md
+    # Local: build. Produção: API_IMAGE/MERGE_IMAGE no .env (GHCR) — ver docs/CI_CD.md
     image: ${MERGE_IMAGE:-livebridge-merge:local}
     build: ./merge
     container_name: livebridge-merge
