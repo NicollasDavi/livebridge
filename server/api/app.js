@@ -8,6 +8,8 @@ import { registerLiveRoutes } from './routes/live.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerMediaMtxHttpAuth } from './routes/mediamtxHttpAuth.js';
+import { registerSettingsRoutes } from './routes/settings.js';
+import { syncRecordLiveToMediaMtx } from './services/settings.js';
 import { setupPrometheusMetrics } from './middleware/metricsHttp.js';
 import { hasR2 } from './r2.js';
 
@@ -28,13 +30,14 @@ export function createApp() {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization']
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Access-Token']
     })
   );
   app.use(cookieParser());
   app.use(express.json({ limit: cfg.API_JSON_LIMIT }));
 
   registerHealthRoutes(app);
+  registerSettingsRoutes(app);
   setupPrometheusMetrics(app);
 
   app.use((req, res, next) => {
@@ -65,4 +68,7 @@ export function logStartupHints() {
   }
   if (!hasR2) console.log('R2 não configurado — aba Gravações desabilitada');
   if (!cfg.hasLessonsApi) console.log('API Lessons não configurada — metadata desabilitada');
+  syncRecordLiveToMediaMtx()
+    .then((v) => console.log(`[API] recordLive sincronizado com MediaMTX: ${v}`))
+    .catch((e) => console.warn('[API] sync recordLive (MediaMTX pode ainda não estar up):', e?.message));
 }

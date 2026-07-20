@@ -1,34 +1,29 @@
 #!/bin/sh
-# Gera 3 RTMP derivados (1080p, 720p, 480p) a partir da publicação principal em $MTX_PATH.
-# Bitrates devem coincidir com LIVE_ABR_* em server/api/server.js (playlist master).
+# Gera 2 RTMP derivados (720p, 480p) a partir da publicação principal em $MTX_PATH.
+# O rung de maior qualidade ("Fonte") é servido direto do ingest do OBS, sem reencode
+# (ver playlist master em server/api/routes/live.js). Antes eram 3 encodes x264 em paralelo;
+# ao deixar o topo passthrough sobra CPU para um preset melhor + B-frames nas 2 saídas.
+# Bitrates devem coincidir com LIVE_ABR_* em server/api/config.js (playlist master).
 # Requer imagem bluenviron/mediamtx:*-ffmpeg.
 
 set -e
 INPUT="rtmp://127.0.0.1:1935/${MTX_PATH}"
-OUT108="${MTX_PATH}_1080"
 OUT720="${MTX_PATH}_720"
 OUT480="${MTX_PATH}_480"
-# ultrafast < superfast < veryfast em custo CPU — usar o MESMO preset nas 3 saídas (720 estava veryfast e agravava "reader is too slow").
-PRESET="${TRANSCODE_PRESET:-superfast}"
-# Alinhar GOP à duração do segmento HLS (mediamtx hlsSegmentDuration) — menos trabalho do encoder e cortes limpos nos .ts
-HLS_GOP_SEC="${HLS_GOP_SEC:-10}"
-# Fila na entrada RTMP: quanto maior, mais margem antes de "reader is too slow" (3× x264 em paralelo).
+# Só 2 encodes agora → headroom de CPU. veryfast com B-frames bate folgado o superfast+zerolatency em qualidade.
+PRESET="${TRANSCODE_PRESET:-veryfast}"
+# Alinhar GOP à duração do segmento HLS (mediamtx hlsSegmentDuration) — cortes limpos nos .ts e troca de qualidade ABR.
+HLS_GOP_SEC="${HLS_GOP_SEC:-4}"
+# Fila na entrada RTMP: quanto maior, mais margem antes de "reader is too slow".
 THREAD_Q="${FFMPEG_THREAD_QUEUE_SIZE:-4096}"
-# Menos B-frames / latência → menos "reordered frames" e erros DTS no muxer HLS do MediaMTX (ver logs [HLS] muxer).
-# Override: X264_LIVE_OPTS="-tune zerolatency -bf 0"
-X264_LIVE_OPTS=${X264_LIVE_OPTS:-"-tune zerolatency -bf 0 -refs 1"}
+# Sem zerolatency: como a entrega é HLS por segmentos (não LL), B-frames e múltiplas refs
+# melhoram muito a qualidade no mesmo bitrate. Voltar ao antigo: X264_LIVE_OPTS="-tune zerolatency -bf 0 -refs 1"
+X264_LIVE_OPTS=${X264_LIVE_OPTS:-"-bf 2 -refs 3"}
 
 exec ffmpeg -hide_banner -loglevel warning \
   -thread_queue_size "$THREAD_Q" \
   -i "$INPUT" \
-  -filter_complex "[0:v]split=3[v0][v1][v2];[v0]scale=-2:1080[vout0];[v1]scale=-2:720[vout1];[v2]scale=-2:480[vout2]" \
-  -map "[vout0]" -map "0:a?" \
-  -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
-  -b:v 4500k -maxrate 4500k -bufsize 9000k \
-  -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
-  -c:a aac -b:a 128k -ar 44100 \
-  -max_muxing_queue_size 4096 \
-  -f flv "rtmp://127.0.0.1:1935/${OUT108}" \
+  -filter_complex "[0:v]split=2[v1][v2];[v1]scale=-2:720[vout1];[v2]scale=-2:480[vout2]" \
   -map "[vout1]" -map "0:a?" \
   -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 2800k -maxrate 2800k -bufsize 5600k \

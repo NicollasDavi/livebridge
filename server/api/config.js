@@ -87,6 +87,18 @@ export const LESSONS_API_URL = process.env.LESSONS_API_URL || 'https://api.posih
 export const LESSONS_API_TOKEN = process.env.LESSONS_API_TOKEN || process.env.API_ACCESS_TOKEN;
 export const RECORDINGS_DIR = trim(process.env.RECORDINGS_DIR, '/recordings');
 export const MERGE_INTERNAL_URL = process.env.MERGE_INTERNAL_URL || 'http://merge:8080';
+/**
+ * Default inicial se ainda não existir `livebridge-settings.json`
+ * (alterado em runtime por PUT /api/settings no front externo).
+ * 1 = merge/VOD; 0 = só-live.
+ */
+export const MERGE_ENABLED = (() => {
+  const v = String(process.env.MERGE_ENABLED ?? '1').trim().toLowerCase();
+  return !['0', 'false', 'off', 'no'].includes(v);
+})();
+/** Token para PUT /api/settings. Fallback: API_ACCESS_TOKEN. */
+export const SETTINGS_TOKEN = trim(process.env.SETTINGS_TOKEN, '');
+export const API_ACCESS_TOKEN = trim(process.env.API_ACCESS_TOKEN, '');
 /** 0 = sem timeout no fetch para POST /merge. Em ms se >0 (ex.: 604800000 = 7d) — proxies que cortam ligações longas. */
 export const MERGE_POST_TIMEOUT_MS = Math.max(0, parseInt(process.env.MERGE_POST_TIMEOUT_MS || '0', 10) || 0);
 /** Base URL da Control API do MediaMTX (Docker: http://mediamtx:9997). */

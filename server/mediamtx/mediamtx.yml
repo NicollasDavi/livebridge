@@ -1,4 +1,4 @@
-# LiveBridge - MediaMTX (HLS 10s — menos pedidos HTTP/seg que segmentos curtos; DVR 8h)
+# LiveBridge - MediaMTX (HLS 4s — menor latência; nginx faz cache dos .ts; DVR 8h)
 
 logLevel: warn
 
@@ -38,9 +38,10 @@ hlsAddress: :8888
 hlsAllowOrigin: '*'
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-# DVR ~8h: 2880 × 10s = 28800s (10s = menos ficheiros em disco e menos auth_request/nginx por minuto)
-hlsSegmentCount: 2880
-hlsSegmentDuration: 10s
+# DVR ~8h: 7200 × 4s = 28800s. 4s reduz a latência (~10–12s) vs 10s (~25–30s).
+# Mais pedidos .ts/min, mas o nginx faz cache de segmento (1 MISS por .ts) e o auth tem cache (~25s).
+hlsSegmentCount: 7200
+hlsSegmentDuration: 4s
 hlsSegmentMaxSize: 50M
 hlsDirectory: /hls
 

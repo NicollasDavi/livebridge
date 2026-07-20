@@ -21,6 +21,7 @@ import {
   logLessonsApiAuthFailure
 } from '../services/lessons.js';
 import * as disk from '../services/disk.js';
+import * as settings from '../services/settings.js';
 import { isMainLiveStreamOnline } from '../services/mediamtxControl.js';
 import { requireR2, requireVideoAuth } from '../middleware/authRecordings.js';
 import { signVideoAccessToken } from '../lib/jwtLive.js';
@@ -505,10 +506,21 @@ export function registerRecordingsRoutes(app) {
     try {
       const { path: p, session } = req.body?.path ? req.body : req.query;
       if (!p || !session) return res.status(400).json({ error: 'path e session obrigatórios' });
+      if (p.includes('..') || session.includes('..')) {
+        return res.status(400).json({ error: 'parâmetros inválidos' });
+      }
       const base = `${R2_VIDEOS_PREFIX}${p}/${session}`;
       const keys = [`${base}.mp4`, `${base}_1080.mp4`, `${base}_720.mp4`, `${base}_480.mp4`];
       await Promise.all(keys.map((Key) => s3.send(new DeleteObjectCommand({ Bucket: cfg.R2_BUCKET, Key }))));
-      res.json({ ok: true, message: 'Vídeo(s) removido(s)' });
+      const local = disk.deleteLocalRecordingArtifacts(p, session);
+      if (!local.ok) {
+        console.warn('[API] DELETE /api/recordings: R2 OK mas disco:', local.reason);
+      }
+      res.json({
+        ok: true,
+        message: 'Vídeo(s) removido(s) no R2 e na pasta de gravações (quando existiam).',
+        local: { ok: local.ok, removedSessionDir: local.removedDir === true, reason: local.reason || null }
+      });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: e.message });
@@ -520,6 +532,14 @@ export function registerRecordingsRoutes(app) {
       const { streamName, name, materia, n_aula, frente, professor, folder_ids, course_ids } = req.body;
       if (!streamName || typeof streamName !== 'string') {
         return res.status(400).json({ error: 'streamName obrigatório' });
+      }
+      if (!settings.isMergeEnabled()) {
+        return res.json({
+          ok: true,
+          mergeEnabled: false,
+          status: 'skipped',
+          message: 'Merge/VOD desativado (/api/settings). Modo só-live — nada a processar.'
+        });
       }
       const discovered = await disk.discoverCurrentSessionAsync(streamName.trim());
       if (!discovered) {
@@ -603,6 +623,13 @@ export function registerRecordingsRoutes(app) {
       const { streamName, name, materia, n_aula, frente, professor, folder_ids, course_ids } = req.body;
       if (!streamName || typeof streamName !== 'string') {
         return res.status(400).json({ error: 'streamName obrigatório' });
+      }
+      if (!settings.isMergeEnabled()) {
+        return res.status(503).json({
+          ok: false,
+          mergeEnabled: false,
+          error: 'Merge/VOD desativado (/api/settings). lesson-boundary indisponível em modo só-live.'
+        });
       }
       const stream = streamName.trim();
       const path = `live/${stream}`;

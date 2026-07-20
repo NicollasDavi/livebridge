@@ -1,4 +1,5 @@
 import * as cfg from '../config.js';
+import { isMergeEnabled } from '../services/settings.js';
 
 const READY_TIMEOUT_MS = Math.min(5000, cfg.MEDIAMTX_HTTP_TIMEOUT_MS);
 
@@ -9,7 +10,11 @@ const READY_TIMEOUT_MS = Math.min(5000, cfg.MEDIAMTX_HTTP_TIMEOUT_MS);
 export function registerHealthRoutes(app) {
   app.get('/api/health', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, service: 'livebridge-api' });
+    res.json({
+      ok: true,
+      service: 'livebridge-api',
+      mergeEnabled: isMergeEnabled()
+    });
   });
 
   app.get('/api/ready', async (_req, res) => {

@@ -1,0 +1,14 @@
+[Unit]
+Description=LiveBridge pull deploy from GCS (sem SSH)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/livebridge/pull-deploy.env
+ExecStart=/opt/livebridge/server/scripts/gcp-pull-deploy.sh
+User=root
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

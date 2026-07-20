@@ -6,7 +6,8 @@ import {
   writeFileSync,
   readFileSync,
   copyFileSync,
-  unlinkSync
+  unlinkSync,
+  rmSync
 } from 'fs';
 import { readdir, readFile, access, stat } from 'fs/promises';
 import { join } from 'path';
@@ -15,6 +16,81 @@ import * as cfg from '../config.js';
 export function mergeProgressFilePath(p, session) {
   const safe = `${p.replace(/\//g, '_')}__${String(session).replace(/[/\\]/g, '_')}`;
   return join(cfg.MERGE_PROGRESS_DIR, `${safe}.json`);
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Remove gravação no disco: pasta `RECORDINGS_DIR/path/session` (se existir), ou layout “flat”
+ * (só .ts + mp4 com prefixo session em `RECORDINGS_DIR/path`). Também apaga JSON de merge-progress
+ * e pending live-ended quando aplicável.
+ */
+export function deleteLocalRecordingArtifacts(path, session) {
+  if (!path || !session || typeof path !== 'string' || typeof session !== 'string') {
+    return { ok: false, reason: 'invalid' };
+  }
+  if (path.includes('..') || session.includes('..')) return { ok: false, reason: 'invalid' };
+  if (session.includes('/') || session.includes('\\')) return { ok: false, reason: 'invalid_session' };
+  if (!path.startsWith('live/')) return { ok: false, reason: 'invalid_path' };
+  const streamName = path.replace(/^live\//, '');
+  if (!streamName || streamName.includes('/')) return { ok: false, reason: 'invalid_path' };
+  if (session.startsWith('_w_')) return { ok: false, reason: 'invalid_session' };
+
+  const livePath = join(cfg.RECORDINGS_DIR, path);
+  const sessionSubdir = join(livePath, session);
+  let removedDir = false;
+
+  try {
+    if (existsSync(sessionSubdir) && statSync(sessionSubdir).isDirectory()) {
+      rmSync(sessionSubdir, { recursive: true, force: true });
+      removedDir = true;
+    } else if (existsSync(livePath) && statSync(livePath).isDirectory()) {
+      const tsRe = new RegExp(`^${escapeRegex(session)}(-\\d+)?\\.ts$`, 'i');
+      for (const name of readdirSync(livePath)) {
+        if (tsRe.test(name)) {
+          try {
+            unlinkSync(join(livePath, name));
+          } catch (_) {}
+        }
+      }
+      for (const suf of ['', '_1080', '_720', '_480']) {
+        const mp4 = `${session}${suf}.mp4`;
+        const fp = join(livePath, mp4);
+        if (existsSync(fp)) {
+          try {
+            unlinkSync(fp);
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[disk] deleteLocalRecordingArtifacts I/O:', e?.message);
+    return { ok: false, reason: e?.message || 'io_error' };
+  }
+
+  try {
+    const mp = mergeProgressFilePath(path, session);
+    if (existsSync(mp)) unlinkSync(mp);
+  } catch (e) {
+    console.warn('[disk] merge-progress cleanup:', e?.message);
+  }
+
+  try {
+    if (session.endsWith('_aula')) {
+      deleteLiveEndedPartial(streamName, session);
+    } else {
+      const st = readLiveEndedStatus(streamName);
+      if (st && st.session === session && st.path === path) {
+        deleteLiveEndedStatusFile(streamName);
+      }
+    }
+  } catch (e) {
+    console.warn('[disk] live-ended cleanup:', e?.message);
+  }
+
+  return { ok: true, removedDir };
 }
 
 export function getBoundariesFile(streamName) {

@@ -258,7 +258,7 @@ Content-Type: application/json
 
 ## 8. `DELETE /api/recordings`
 
-**Descrição:** Remove o vídeo do bucket R2.
+**Descrição:** Remove o vídeo no **R2** (objetos `session.mp4` e variantes `_1080` / `_720` / `_480`, se existirem) e, em seguida, limpa o que estiver no **disco** sob `RECORDINGS_DIR` para o mesmo `path` + `session`: pasta da sessão (ex. gravação parcial `*_aula`), ou no layout *flat* os `.ts` e `.mp4` locais cujo nome corresponde à sessão. Também remove o JSON de progresso de merge e o estado `live-ended` / `live-ended partial` associado, quando aplicável.
 
 **Request:**
 ```
@@ -276,9 +276,30 @@ Content-Type: application/json
 
 Ou via query: `?path=live/matematica&session=2026-03-10_16-33-50`
 
-**Response 200:** `{ "ok": true, "message": "Vídeo removido" }`
+**Validação:** `path` deve começar por `live/`; `path` e `session` não podem conter `..`; `session` não pode conter `/` ou `\`.
 
-**Erros:** 400 (path/session ausentes), 503 (R2 não configurado)
+**Response 200:**
+```json
+{
+  "ok": true,
+  "message": "Vídeo(s) removido(s) no R2 e na pasta de gravações (quando existiam).",
+  "local": {
+    "ok": true,
+    "removedSessionDir": true,
+    "reason": null
+  }
+}
+```
+
+| Campo em `local` | Descrição |
+|-------------------|-----------|
+| `ok` | Se a limpeza no disco (validação + I/O) concluiu sem erro. |
+| `removedSessionDir` | `true` se existia e foi apagada a pasta `path/session`; `false` no layout só com ficheiros na pasta do stream ou se não havia pasta de sessão. |
+| `reason` | Em falha (ex. caminho inválido, erro de I/O), string com o motivo; em sucesso costuma ser `null`. |
+
+**Nota:** Em caso de falha só no disco após o R2 já ter sido apagado, a API pode responder **200** com `ok: true` e `local.ok` igual a `false` — ver `local.reason` e os logs do servidor.
+
+**Erros:** 400 (`path`/`session` ausentes ou inválidos), 500 (falha ao apagar no R2), 503 (R2 não configurado — a rota exige R2).
 
 ---
 
@@ -577,7 +598,7 @@ const poll = async () => {
 | GET | /api/recordings/video | Stream MP4 |
 | PUT | /api/recordings/name | Atualizar nome |
 | PUT | /api/recordings/metadata | Atualizar metadata |
-| DELETE | /api/recordings | Excluir vídeo |
+| DELETE | /api/recordings | Excluir vídeo no R2 e na pasta de gravações |
 | POST | /api/recordings/live-ended | Finalizar live inteira |
 | POST | /api/recordings/lesson-boundary | Salvar parte da live (aula acabou, live continua) |
 | GET | /api/recordings/merge-progress | % compactação + upload + ETA |

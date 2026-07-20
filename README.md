@@ -12,6 +12,10 @@ Servidor de streaming ao vivo com HLS.
 
 **⚡ [API — Performance e paginação](docs/API-Integracao-Performance-e-Paginacao.md)** — Logs, `GET /api/recordings?paginate=1`, variáveis de ambiente e impacto na integração.
 
+**⚙️ [API Settings (front)](docs/API_SETTINGS_FRONT.md)** — `GET/PUT /api/settings`: merge, encode, gravação; contrato para o frontend.
+
+**🚀 [CI/CD](docs/CI_CD.md)** — GitHub Actions → Artifact Registry/GCS; VM faz pull (sem SSH).
+
 ## Início rápido
 
 ```bash
@@ -62,6 +66,27 @@ Algumas redes corporativas inspecionam a **80** e podem interferir com RTMP; nes
 **Se usar 1080p:** bitrate vídeo 6000–8000 kbps.
 
 O merge usa **HEVC (H.265)** com preset **veryslow** e CRF ~28, mais **AAC 64k** — prioridade em **menor tamanho de arquivo** (encode mais lento). Ajuste em `.env`: `COMPRESS_CODEC`, `COMPRESS_PRESET`, `COMPRESS_CRF`, `COMPRESS_AUDIO_BITRATE`.
+
+## Settings via API (sem UI)
+
+O frontend externo controla merge/encode/gravação:
+
+```http
+GET  /api/settings
+PUT  /api/settings
+Content-Type: application/json
+X-Access-Token: <SETTINGS_TOKEN ou API_ACCESS_TOKEN>
+
+{
+  "mergeEnabled": false,
+  "compressPreset": "fast",
+  "compressCodec": "h265",
+  "mergeResolutions": "1080,720,480",
+  "recordLive": true
+}
+```
+
+Detalhes: [`docs/API_SETTINGS_FRONT.md`](docs/API_SETTINGS_FRONT.md). Estado em `recordings/livebridge-settings.json`.
 
 ## Gravação no R2 (Cloudflare)
 

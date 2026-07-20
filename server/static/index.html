@@ -13,15 +13,12 @@
 </head>
 <body>
   <h1>LiveBridge API</h1>
-  <p>Frontend removido. Use seu frontend em outra URL.</p>
-  <p>API disponível em:</p>
+  <p>Sem frontend neste repositório. Integre via API — ver <code>docs/Frontend-Externo.md</code>.</p>
   <ul>
-    <li><code>/api/recordings</code> — listar gravações</li>
-    <li><code>/api/recordings/video</code> — stream MP4</li>
-    <li><code>/api/init-live</code> — iniciar live</li>
-    <li><code>/api/live/hls-master.m3u8?streamName={stream}</code> — HLS ABR (1080 / 720 / 480)</li>
-    <li><code>/hls/live/{stream}/index.m3u8</code> — HLS qualidade da OBS (ingest)</li>
+    <li><code>GET/PUT /api/settings</code> — merge, encode, gravação (.ts)</li>
+    <li><code>/api/recordings</code> — gravações</li>
+    <li><code>/api/init-live</code> — live</li>
+    <li><code>/api/live/hls-master.m3u8</code> — HLS ABR</li>
   </ul>
-  <p>Documentação: <code>docs/Frontend-Externo.md</code></p>
 </body>
 </html>

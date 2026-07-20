@@ -22,6 +22,7 @@ import { createR2S3Client, R2_VIDEOS_PREFIX } from './lib/r2Client.mjs';
 import { createProgressWriter } from './lib/progressThrottle.js';
 import { createVariantSnapshotter } from './lib/variantSnapshot.js';
 import { runBatchedAll } from './lib/asyncPool.js';
+import { isMergeEnabled, getRuntimeSettings } from './lib/runtimeSettings.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,17 +36,8 @@ const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY?.trim();
 const R2_SECRET_KEY = process.env.R2_SECRET_KEY?.trim();
 const R2_BUCKET = (process.env.R2_BUCKET || 'livebridge').trim();
 const MERGE_CALLBACK_URL = process.env.MERGE_CALLBACK_URL || '';
-const COMPRESS_VIDEO = process.env.COMPRESS_VIDEO !== '0';
-/** h265 = menor arquivo (HEVC). h264 = compatibilidade máxima com players antigos */
-const COMPRESS_CODEC = (process.env.COMPRESS_CODEC || 'h265').toLowerCase();
-/** veryslow = melhor eficiência de compressão (mais tempo de CPU) */
-const COMPRESS_PRESET = process.env.COMPRESS_PRESET || 'veryslow';
-const COMPRESS_CRF_H264 = parseInt(process.env.COMPRESS_CRF_H264 || process.env.COMPRESS_CRF || '23', 10) || 23;
-const COMPRESS_CRF_H265 = parseInt(process.env.COMPRESS_CRF_H265 || process.env.COMPRESS_CRF || '28', 10) || 28;
-const COMPRESS_AUDIO_BITRATE = (process.env.COMPRESS_AUDIO_BITRATE || '64k').trim();
+/** Encode/preset/resoluções: getRuntimeSettings() (PUT /api/settings) ou env. */
 const FFMPEG_TIMEOUT_MS = parseInt(process.env.FFMPEG_TIMEOUT_MS || '43200000', 10) || 43200000;
-/** single = um MP4 session.mp4 (legado). Padrão: 1080,720,480 → três MP4 no R2 */
-const MERGE_RESOLUTIONS_RAW = (process.env.MERGE_RESOLUTIONS || '1080,720,480').trim().toLowerCase();
 /** Paralelismo de encodes (multi-resolução). 1 = sequencial. */
 const MERGE_ENCODE_CONCURRENCY = Math.max(1, Math.min(4, parseInt(process.env.MERGE_ENCODE_CONCURRENCY || '1', 10) || 1));
 const MERGE_PROGRESS_THROTTLE_MS = Math.max(50, parseInt(process.env.MERGE_PROGRESS_THROTTLE_MS || '400', 10) || 400);
@@ -75,11 +67,14 @@ const MERGE_LIBX264_BF = Math.max(
   Math.min(16, parseInt(process.env.MERGE_LIBX264_BF ?? '0', 10) || 0)
 );
 
-function parseMergeHeights() {
-  if (MERGE_RESOLUTIONS_RAW === 'single' || MERGE_RESOLUTIONS_RAW === '0' || MERGE_RESOLUTIONS_RAW === 'false') {
+function parseMergeHeights(resolutionsRaw = null) {
+  const raw = String(resolutionsRaw ?? getRuntimeSettings().mergeResolutions)
+    .trim()
+    .toLowerCase();
+  if (raw === 'single' || raw === '0' || raw === 'false') {
     return null;
   }
-  const parts = MERGE_RESOLUTIONS_RAW.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => n > 0);
+  const parts = raw.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => n > 0);
   return parts.length ? parts : [1080, 720, 480];
 }
 
@@ -192,8 +187,9 @@ function mp4WebMuxTail(outPath) {
   return ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath];
 }
 
-/** Args ffmpeg para máxima compactação: HEVC + preset lento ou H.264 equivalente */
+/** Args ffmpeg — codec/preset/CRF vêm de /api/settings (ficheiro runtime) ou env. */
 function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
+  const rt = opts.rt || getRuntimeSettings();
   const targetHeight = opts.targetHeight;
   const tail = mp4WebMuxTail(outPath);
   const base = ['-y', '-threads', '0', ...concatDemuxerInput(listPath)];
@@ -204,14 +200,14 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
       `scale=-2:${targetHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`
     );
   }
-  const audio = ['-c:a', 'aac', '-b:a', COMPRESS_AUDIO_BITRATE, '-aac_coder', 'twoloop'];
+  const audio = ['-c:a', 'aac', '-b:a', rt.compressAudioBitrate, '-aac_coder', 'twoloop'];
 
-  if (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') {
+  if (rt.compressCodec === 'h265') {
     return [
       ...base,
       '-c:v', 'libx265',
-      '-crf', String(COMPRESS_CRF_H265),
-      '-preset', COMPRESS_PRESET,
+      '-crf', String(rt.compressCrfH265),
+      '-preset', rt.compressPreset,
       '-tag:v', 'hvc1',
       '-x265-params', 'bframes=0',
       ...audio,
@@ -221,8 +217,8 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
   return [
     ...base,
     '-c:v', 'libx264',
-    '-crf', String(COMPRESS_CRF_H264),
-    '-preset', COMPRESS_PRESET,
+    '-crf', String(rt.compressCrfH264),
+    '-preset', rt.compressPreset,
     '-tune', 'animation',
     '-bf', String(MERGE_LIBX264_BF),
     ...audio,
@@ -232,6 +228,7 @@ function buildCompressFfmpegArgs(listPath, outPath, opts = {}) {
 
 /** Segunda tentativa (H.264 + preset médio) se o HEVC falhar — mantém a mesma altura (ex. 480p obrigatório). */
 function buildFallbackH264Args(listPath, outPath, opts = {}) {
+  const rt = opts.rt || getRuntimeSettings();
   const targetHeight = opts.targetHeight;
   const tail = mp4WebMuxTail(outPath);
   const base = ['-y', '-threads', '0', ...concatDemuxerInput(listPath)];
@@ -241,11 +238,11 @@ function buildFallbackH264Args(listPath, outPath, opts = {}) {
       `scale=-2:${targetHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`
     );
   }
-  const audio = ['-c:a', 'aac', '-b:a', COMPRESS_AUDIO_BITRATE, '-aac_coder', 'twoloop'];
+  const audio = ['-c:a', 'aac', '-b:a', rt.compressAudioBitrate, '-aac_coder', 'twoloop'];
   return [
     ...base,
     '-c:v', 'libx264',
-    '-crf', String(Math.min(COMPRESS_CRF_H264 + 2, 28)),
+    '-crf', String(Math.min(rt.compressCrfH264 + 2, 28)),
     '-preset', 'medium',
     '-tune', 'animation',
     '-bf', String(MERGE_LIBX264_BF),
@@ -305,9 +302,11 @@ async function mergeAndUploadMulti(
   isAula,
   deleteFolderAfter,
   heights,
-  workDir
+  workDir,
+  rt
 ) {
-  const videoCodecLabel = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') ? 'hevc' : 'h264';
+  const enc = rt || getRuntimeSettings();
+  const videoCodecLabel = enc.compressCodec === 'h265' ? 'hevc' : 'h264';
   const variants = makeVariantStates(heights);
   const snapVariants = createVariantSnapshotter();
   const n = heights.length;
@@ -339,7 +338,7 @@ async function mergeAndUploadMulti(
       message: `Convertendo ${label} (${j + 1}/${n}) — ${videoCodecLabel.toUpperCase()}…`
     }, { immediate: true });
 
-    const ffmpegArgs = buildCompressFfmpegArgs(listPath, outPath, { targetHeight: h });
+    const ffmpegArgs = buildCompressFfmpegArgs(listPath, outPath, { targetHeight: h, rt: enc });
     const encStart = Date.now();
     const onEncodingTick = (tick) => {
       variants[j].encodingPercent = tick.encodingPercent;
@@ -369,14 +368,14 @@ async function mergeAndUploadMulti(
       await runFfmpegWithProgress(ffmpegArgs, durationSec, encStart, onEncodingTick);
     } catch (e1) {
       let errFinal = e1;
-      if (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') {
+      if (enc.compressCodec === 'h265') {
         try {
           if (existsSync(outPath)) unlinkSync(outPath);
         } catch (_) {}
         console.warn(`[merge] ${label}: HEVC falhou; retentativa com H.264 (mantém ${h}px)…`);
         try {
           await runFfmpegWithProgress(
-            buildFallbackH264Args(listPath, outPath, { targetHeight: h }),
+            buildFallbackH264Args(listPath, outPath, { targetHeight: h, rt: enc }),
             durationSec,
             encStart,
             onEncodingTick
@@ -704,9 +703,10 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
   writeFileSync(listPath, listContent);
 
   const durationSec = await probeConcatDurationSec(listPath);
-  let heights = parseMergeHeights();
-  if (heights && !COMPRESS_VIDEO) {
-    console.warn('[merge] Multi-resolução (MERGE_RESOLUTIONS) exige COMPRESS_VIDEO=1; gerando um arquivo (copy).');
+  const rt = getRuntimeSettings();
+  let heights = parseMergeHeights(rt.mergeResolutions);
+  if (heights && !rt.compressVideo) {
+    console.warn('[merge] Multi-resolução (mergeResolutions) exige COMPRESS_VIDEO=1; gerando um arquivo (copy).');
     heights = null;
   }
   if (Array.isArray(heights) && heights.length > 0) {
@@ -720,11 +720,12 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
       isAula,
       deleteFolderAfter,
       heights,
-      workDir
+      workDir,
+      rt
     );
   }
 
-  const videoCodecLabel = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc') ? 'hevc' : 'h264';
+  const videoCodecLabel = rt.compressCodec === 'h265' ? 'hevc' : 'h264';
   const singlePb = () => ({
     schemaVersion: 2,
     mergeMode: 'single',
@@ -751,8 +752,8 @@ async function mergeAndUpload(path, sessionNameOrDir = null) {
     message: 'Compactando vídeo…'
   }, { immediate: true });
 
-  const ffmpegArgs = COMPRESS_VIDEO
-    ? buildCompressFfmpegArgs(listPath, outPath, {})
+  const ffmpegArgs = rt.compressVideo
+    ? buildCompressFfmpegArgs(listPath, outPath, { rt })
     : [
         '-y',
         ...concatDemuxerInput(listPath),
@@ -1009,6 +1010,13 @@ async function notifyUploadComplete(path, session, variants = null) {
 }
 
 app.post('/merge', async (req, res) => {
+  if (!isMergeEnabled()) {
+    return res.status(503).json({
+      ok: false,
+      mergeEnabled: false,
+      error: 'Merge/VOD desativado (/api/settings). Modo só-live.'
+    });
+  }
   const path = req.query.path || req.body?.path;
   if (!path) {
     return res.status(400).json({ error: 'path obrigatório' });
@@ -1050,6 +1058,13 @@ app.get('/merge/progress', (req, res) => {
 });
 
 app.post('/merge/upload', async (req, res) => {
+  if (!isMergeEnabled()) {
+    return res.status(503).json({
+      ok: false,
+      mergeEnabled: false,
+      error: 'Merge/VOD desativado (/api/settings). Modo só-live.'
+    });
+  }
   const path = req.query.path || req.body?.path;
   const session = req.query.session || req.body?.session;
   if (!path || !session) {
@@ -1096,7 +1111,7 @@ app.post('/merge/upload', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ ok: true, mergeEnabled: isMergeEnabled() }));
 
 function scanRecordings() {
   const result = {
@@ -1196,6 +1211,11 @@ function scheduleMergeJob(key, startedLog, task) {
 }
 
 async function findStaleSessions() {
+  if (!isMergeEnabled()) {
+    scanCount++;
+    if (scanCount % 120 === 1) console.log('[merge] Scan pausado — merge desligado (/api/settings)');
+    return;
+  }
   if (scanInProgress) return;
   scanInProgress = true;
   try {
@@ -1317,7 +1337,12 @@ setTimeout(() => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
+  const bootRt = getRuntimeSettings();
   console.log(`Merge service rodando na porta ${PORT}`);
+  console.log(
+    `[merge] Runtime settings: mergeEnabled=${bootRt.mergeEnabled} codec=${bootRt.compressCodec} ` +
+      `preset=${bootRt.compressPreset} resolutions=${bootRt.mergeResolutions} (ficheiro ou env)`
+  );
   console.log(`[merge] R2: ${hasR2 ? 'configurado' : 'NÃO configurado - gravações ficarão só locais'}`);
   console.log(
     `[merge] Scanner: intervalo ${Math.round(MERGE_SCAN_INTERVAL_MS / 1000)}s, concorrência máxima de jobs ${MERGE_MAX_CONCURRENT_JOBS}`
@@ -1325,23 +1350,24 @@ app.listen(PORT, () => {
   console.log(
     `[merge] Upload multipart: queueSize=${R2_UPLOAD_QUEUE_SIZE}, partSize=${R2_UPLOAD_PART_SIZE_MB}MB`
   );
-  const mh = parseMergeHeights();
+  const mh = parseMergeHeights(bootRt.mergeResolutions);
   if (mh) {
     const encNote =
       MERGE_ENCODE_CONCURRENCY > 1
         ? ` Até ${MERGE_ENCODE_CONCURRENCY} encodes em paralelo (MERGE_ENCODE_CONCURRENCY).`
         : '';
     console.log(
-      `[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (MERGE_RESOLUTIONS).${encNote} Todas as resoluções têm de concluir; se HEVC falhar, há uma retentativa automática com H.264 na mesma altura.`
+      `[merge] Saídas por sessão: ${mh.map(variantLabel).join(', ')} (mergeResolutions).${encNote} Todas as resoluções têm de concluir; se HEVC falhar, há uma retentativa automática com H.264 na mesma altura.`
     );
   } else {
-    console.log('[merge] Saída única: session.mp4 (MERGE_RESOLUTIONS=single)');
+    console.log('[merge] Saída única: session.mp4 (mergeResolutions=single)');
   }
-  if (COMPRESS_VIDEO) {
-    const v = (COMPRESS_CODEC === 'h265' || COMPRESS_CODEC === 'hevc')
-      ? `HEVC (libx265) CRF ${COMPRESS_CRF_H265}, preset ${COMPRESS_PRESET}, AAC ${COMPRESS_AUDIO_BITRATE}`
-      : `H.264 CRF ${COMPRESS_CRF_H264}, preset ${COMPRESS_PRESET}, AAC ${COMPRESS_AUDIO_BITRATE}`;
-    console.log(`[merge] Compressão (máx. eficiência): ${v}`);
+  if (bootRt.compressVideo) {
+    const v =
+      bootRt.compressCodec === 'h265'
+        ? `HEVC (libx265) CRF ${bootRt.compressCrfH265}, preset ${bootRt.compressPreset}, AAC ${bootRt.compressAudioBitrate}`
+        : `H.264 CRF ${bootRt.compressCrfH264}, preset ${bootRt.compressPreset}, AAC ${bootRt.compressAudioBitrate}`;
+    console.log(`[merge] Compressão: ${v}`);
   } else {
     console.log('[merge] Compressão: desligada (copy)');
   }

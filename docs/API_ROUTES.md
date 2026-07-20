@@ -486,6 +486,21 @@ Body: { "id": "live/matematica|2026-03-10_16-33-50", "name": "Novo nome" }
 
 ---
 
+### LiveBridge: `DELETE /api/recordings`
+
+Remove o vídeo no **R2** e os ficheiros locais em `RECORDINGS_DIR` para o mesmo `path` e `session` (pasta de sessão ou layout *flat*), além de JSONs de progresso / `live-ended` associados. Requer R2 configurado. Detalhes da resposta (`local.ok`, `local.removedSessionDir`, `local.reason`) em `docs/API_Rotas_Completo.md` §8.
+
+**Request:**
+```
+DELETE {LIVEBRIDGE_URL}/api/recordings
+Content-Type: application/json
+Body: { "path": "live/matematica", "session": "2026-03-10_16-33-50" }
+```
+
+Ou query: `?path=live/matematica&session=2026-03-10_16-33-50`
+
+---
+
 ## Rotas auxiliares
 
 ### LiveBridge: `GET /api/init`
@@ -550,5 +565,6 @@ Quando `VIDEO_ACCESS_SECRET` **não** está definido:
 | **Listar gravações** | LiveBridge → /api/recordings | — |
 | **Atualizar metadata** | LiveBridge → /api/recordings/metadata | — |
 | | (LiveBridge → Java PUT /api/lessons) | — |
+| **Excluir gravação** | LiveBridge → `DELETE /api/recordings` | — |
 
 O Java **não chama** o LiveBridge. O Java apenas gera tokens; o frontend usa esses tokens nas requisições ao LiveBridge.

@@ -125,8 +125,10 @@ export function registerLiveRoutes(app) {
     const body = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
-      `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_1080},RESOLUTION=1920x1080,NAME="1080p"`,
-      `${hp}/live/${enc}_1080/${pl}`,
+      // Rung de topo = ingest original do OBS (sem reencode): melhor imagem possível e zero CPU.
+      // O transcode-abr.sh só gera 720/480. RESOLUTION é nominal (depende do que o OBS publica).
+      `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_1080},RESOLUTION=1920x1080,NAME="Fonte"`,
+      `${hp}/live/${enc}/${pl}`,
       `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_720},RESOLUTION=1280x720,NAME="720p"`,
       `${hp}/live/${enc}_720/${pl}`,
       `#EXT-X-STREAM-INF:BANDWIDTH=${cfg.LIVE_ABR_BANDWIDTH_480},RESOLUTION=854x480,NAME="480p"`,

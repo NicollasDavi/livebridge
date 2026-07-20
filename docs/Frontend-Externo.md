@@ -47,3 +47,13 @@ Retorna as aulas que foram finalizadas com `live-ended` — já registradas como
 ```
 
 **Uso:** Mostrar no frontend as aulas que acabaram de finalizar, com status "Compactando e enviando..." até ficarem `ready`.
+
+---
+
+## 3. Settings operacionais (merge / encode / gravação)
+
+Guia completo para o front (rotas, auth, campos, tipos TS, checklist):
+
+**→ [API_SETTINGS_FRONT.md](./API_SETTINGS_FRONT.md)**
+
+Resumo: `GET/PUT /api/settings` com patch parcial (`mergeEnabled`, `compressPreset`, `compressCodec`, `mergeResolutions`, `recordLive`). PUT exige `X-Access-Token`. Sem UI neste repo.

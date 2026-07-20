@@ -118,3 +118,44 @@ export function listActiveMainLiveStreams(paths) {
   out.sort((a, b) => (a.streamName || '').localeCompare(b.streamName || '', 'pt'));
   return out;
 }
+
+/** Path conf do ingest principal em mediamtx.yml (gravação .ts para merge). */
+export const MTX_INGEST_PATH_CONF = '~^live/[^/]+$';
+
+/**
+ * Liga/desliga gravação no path de ingest (Control API PATCH).
+ * Não afeta variantes ABR (`record: no` no yml).
+ */
+export async function applyIngestRecording(enabled) {
+  const base = cfg.MEDIAMTX_CONTROL_API_URL.replace(/\/$/, '');
+  const name = encodeURIComponent(MTX_INGEST_PATH_CONF);
+  const body = enabled
+    ? {
+        record: true,
+        recordPath: '/recordings/%path/%Y-%m-%d_%H-%M-%S-%f',
+        recordFormat: 'mpegts',
+        recordSegmentDuration: '60s',
+        recordDeleteAfter: '0s'
+      }
+    : { record: false };
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), cfg.MEDIAMTX_HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}/v3/config/paths/patch/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const err = new Error(`MediaMTX paths/patch HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
+      err.status = res.status;
+      throw err;
+    }
+    console.log(`[mediamtx] recordLive=${!!enabled} (path conf ${MTX_INGEST_PATH_CONF})`);
+  } finally {
+    clearTimeout(t);
+  }
+}

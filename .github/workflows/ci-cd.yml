@@ -1,0 +1,200 @@
+# CI no GitHub + CD sem SSH: push de imagens para Artifact Registry + manifesto no GCS.
+# A VM GCP faz pull outbound (git + docker) via timer — ver docs/CI_CD.md.
+name: CI/CD LiveBridge
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci-cd.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci-cd.yml'
+
+concurrency:
+  group: livebridge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            server/api/package-lock.json
+            server/merge/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: server/api
+        run: npm ci
+
+      - name: Install Merge dependencies
+        working-directory: server/merge
+        run: npm ci
+
+      - name: Syntax check (API)
+        working-directory: server/api
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+          done < <(find . -name '*.js' -not -path './node_modules/*' -print0)
+
+      - name: Syntax check (Merge)
+        working-directory: server/merge
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+          done < <(find . -name '*.js' -not -path './node_modules/*' -print0)
+
+      - name: Validate docker compose
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config --quiet
+          if [ -f docker-compose.observability.yml ]; then
+            docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet
+          fi
+
+      - name: ShellCheck (transcode-abr.sh)
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          severity: error
+          scandir: server/mediamtx
+          format: gcc
+
+  publish:
+    name: Publish images (GCP)
+    needs: ci
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-livebridge
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve image names
+        id: images
+        run: |
+          set -euo pipefail
+          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
+          if [ -z "$PROJECT" ]; then
+            echo "Secret GCP_PROJECT_ID em falta" >&2
+            exit 1
+          fi
+          REGION="${{ vars.GCP_REGION }}"
+          REGION="${REGION:-southamerica-east1}"
+          REPO="${{ vars.ARTIFACT_REGISTRY_REPO }}"
+          REPO="${REPO:-livebridge}"
+          SHA="${GITHUB_SHA}"
+          SHORT="${SHA:0:7}"
+          BASE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}"
+          {
+            echo "region=${REGION}"
+            echo "api=${BASE}/api:${SHA}"
+            echo "api_short=${BASE}/api:${SHORT}"
+            echo "api_latest=${BASE}/api:latest"
+            echo "merge=${BASE}/merge:${SHA}"
+            echo "merge_short=${BASE}/merge:${SHORT}"
+            echo "merge_latest=${BASE}/merge:latest"
+            echo "sha=${SHA}"
+            echo "short=${SHORT}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${{ steps.images.outputs.region }}-docker.pkg.dev" --quiet
+
+      - name: Build and push API
+        working-directory: server/api
+        run: |
+          set -euo pipefail
+          docker build \
+            -t "${{ steps.images.outputs.api }}" \
+            -t "${{ steps.images.outputs.api_short }}" \
+            -t "${{ steps.images.outputs.api_latest }}" \
+            .
+          docker push "${{ steps.images.outputs.api }}"
+          docker push "${{ steps.images.outputs.api_short }}"
+          docker push "${{ steps.images.outputs.api_latest }}"
+
+      - name: Build and push Merge
+        working-directory: server/merge
+        run: |
+          set -euo pipefail
+          docker build \
+            -t "${{ steps.images.outputs.merge }}" \
+            -t "${{ steps.images.outputs.merge_short }}" \
+            -t "${{ steps.images.outputs.merge_latest }}" \
+            .
+          docker push "${{ steps.images.outputs.merge }}"
+          docker push "${{ steps.images.outputs.merge_short }}"
+          docker push "${{ steps.images.outputs.merge_latest }}"
+
+      - name: Publish deploy manifest to GCS
+        env:
+          DEPLOY_BUCKET: ${{ secrets.GCS_DEPLOY_BUCKET }}
+          SHA: ${{ steps.images.outputs.sha }}
+          SHORT: ${{ steps.images.outputs.short }}
+          API_IMAGE: ${{ steps.images.outputs.api }}
+          MERGE_IMAGE: ${{ steps.images.outputs.merge }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_BUCKET}" ]; then
+            echo "Secret GCS_DEPLOY_BUCKET em falta" >&2
+            exit 1
+          fi
+          BUCKET="${DEPLOY_BUCKET#gs://}"
+          python3 <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          manifest = {
+            "sha": os.environ["SHA"],
+            "shortSha": os.environ["SHORT"],
+            "apiImage": os.environ["API_IMAGE"],
+            "mergeImage": os.environ["MERGE_IMAGE"],
+            "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "repository": os.environ["REPO"],
+            "ref": os.environ["REF"],
+          }
+          with open("/tmp/deploy-manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+            f.write("\n")
+          with open("/tmp/deploy-sha.txt", "w", encoding="utf-8") as f:
+            f.write(os.environ["SHA"] + "\n")
+          PY
+          gcloud storage cp /tmp/deploy-manifest.json "gs://${BUCKET}/livebridge/deploy-manifest.json"
+          gcloud storage cp /tmp/deploy-sha.txt "gs://${BUCKET}/livebridge/deploy-sha.txt"
+          echo "Manifesto: gs://${BUCKET}/livebridge/deploy-manifest.json"
