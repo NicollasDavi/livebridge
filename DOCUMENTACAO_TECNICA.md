@@ -1,5 +1,7 @@
 # Documentação Técnica — LiveBridge
 
+> **Atualização 2026:** Runtime atual em [`server/docker-compose.yml`](server/docker-compose.yml): MediaMTX `1.11.3-ffmpeg`, RTMP no host **80**, HTTPS **443**, estáticos em `server/static/` (frontend `player/` removido), HLS **4s** × **7200** segmentos (~8h DVR), publish RTMP com `RTMP_PUBLISH_TOKEN`, VOD estrito via JWT quando `VIDEO_ACCESS_SECRET` está definido. CI publica imagens no **GHCR** ([`docs/CI_CD.md`](docs/CI_CD.md)).
+
 Documentação extensa da aplicação, explicando cada arquivo, configuração e trecho de código, com o propósito de cada decisão técnica.
 
 ---
@@ -12,7 +14,7 @@ Documentação extensa da aplicação, explicando cada arquivo, configuração e
 4. [Merge (concatenação e upload R2)](#4-merge-concatenação-e-upload-r2)
 5. [API (Node.js)](#5-api-nodejs)
 6. [Nginx](#6-nginx)
-7. [Player (frontend)](#7-player-frontend)
+7. [Frontend estático](#7-frontend-estático)
 8. [Variáveis de ambiente](#8-variáveis-de-ambiente)
 
 ---
@@ -67,27 +69,27 @@ Documentação extensa da aplicação, explicando cada arquivo, configuração e
 
 ```yaml
 mediamtx:
-  image: bluenviron/mediamtx:latest
+  image: bluenviron/mediamtx:1.11.3-ffmpeg
   container_name: livebridge-mediamtx
   restart: unless-stopped
   volumes:
     - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    - ./mediamtx/transcode-abr.sh:/transcode-abr.sh:ro
     - ./recordings:/recordings
     - mediamtx-hls:/hls
   ports:
-    - "1935:1935"   # RTMP (OBS)
-    - "8888:8888"   # HLS
+    - "80:1935"   # RTMP no host :80 (OBS: rtmp://IP:80/live)
+    # 8888 HLS — só rede Docker (acesso externo via nginx :443)
 ```
 
 | Campo | Explicação |
 |-------|------------|
-| `image: bluenviron/mediamtx:latest` | Imagem oficial do MediaMTX. `latest` garante atualizações ao fazer `docker compose pull`. |
+| `image: bluenviron/mediamtx:1.11.3-ffmpeg` | Versão fixada com FFmpeg para ABR (`transcode-abr.sh`). |
 | `restart: unless-stopped` | Container reinicia automaticamente após crash ou reboot do servidor. |
-| `./mediamtx/mediamtx.yml:/mediamtx.yml:ro` | Monta o arquivo de configuração. `:ro` = read-only, evita alterações acidentais no container. |
-| `./recordings:/recordings` | Pasta onde o MediaMTX grava os `.ts`. Compartilhada com o Merge para leitura. |
-| `mediamtx-hls:/hls` | Volume nomeado para os segmentos HLS em disco. Evita usar RAM para 8h de DVR. |
-| `1935` | Porta padrão do RTMP. O OBS usa essa porta por padrão. |
-| `8888` | Porta interna do HLS. O acesso externo é via Nginx na 8081. |
+| `./mediamtx/mediamtx.yml:/mediamtx.yml:ro` | Configuração read-only. |
+| `./recordings:/recordings` | Gravação `.ts` para merge/lesson-boundary. |
+| `mediamtx-hls:/hls` | Volume HLS (~8h DVR em disco). |
+| `80:1935` | RTMP público no host; publish exige `RTMP_PUBLISH_TOKEN` (ver `.env`). |
 
 ### 2.2 Serviço `merge`
 
@@ -143,17 +145,20 @@ nginx:
     - api
     - mediamtx
   volumes:
-    - ./player:/usr/share/nginx/html:ro
-    - ./player/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    - ./static:/usr/share/nginx/html:ro
+    - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    - ./certs:/etc/nginx/certs:ro
   ports:
-    - "8081:80"
+    - "443:443"
+    - "127.0.0.1:8081:8080"
 ```
 
 | Campo | Explicação |
 |-------|------------|
-| `depends_on` | Garante que API e MediaMTX subam antes do Nginx. |
-| `./player:/usr/share/nginx/html` | Serve os arquivos estáticos (HTML, JS, CSS) do player. |
-| `8081:80` | Porta única de entrada para o usuário. Toda a aplicação é acessada por `http://IP:8081`. |
+| `depends_on` | API e MediaMTX sobem antes do Nginx. |
+| `./static:/usr/share/nginx/html` | Landing mínima (sem player integrado). |
+| `443:443` | HTTPS — `/api/*`, `/hls/*`, site. |
+| `127.0.0.1:8081:8080` | HTTP interno (localhost na VM). |
 
 ### 2.5 Volume `mediamtx-hls`
 
@@ -162,7 +167,7 @@ volumes:
   mediamtx-hls:
 ```
 
-Volume nomeado para armazenar os segmentos HLS em disco. Com `hlsSegmentCount: 28800` (8h), manter tudo em RAM consumiria vários GB. O `hlsDirectory: /hls` no MediaMTX redireciona os segmentos para esse volume.
+Volume nomeado para armazenar os segmentos HLS em disco. Com `hlsSegmentCount: 7200` e `hlsSegmentDuration: 4s` (~8h DVR), manter tudo em RAM consumiria vários GB. O `hlsDirectory: /hls` no MediaMTX redireciona os segmentos para esse volume.
 
 ---
 
@@ -208,8 +213,8 @@ hlsAddress: :8888
 hlsAllowOrigins: ['*']
 hlsVariant: mpegts
 hlsAlwaysRemux: true
-hlsSegmentCount: 28800
-hlsSegmentDuration: 1s
+hlsSegmentCount: 7200
+hlsSegmentDuration: 4s
 hlsSegmentMaxSize: 50M
 hlsDirectory: /hls
 ```
@@ -219,7 +224,8 @@ hlsDirectory: /hls
 | `hlsAllowOrigins: ['*']` | `*` | Permite CORS de qualquer origem. O player pode estar em outro domínio. |
 | `hlsVariant: mpegts` | mpegts | Segmentos em MPEG-TS. Mais compatível que fMP4 em players antigos. |
 | `hlsAlwaysRemux: true` | true | Garante remux mesmo quando o source já é compatível. Evita problemas de sincronização. |
-| `hlsSegmentCount: 28800` | 28800 | 28800 × 1s = 8h de DVR. Permite voltar ao início da live (estilo YouTube). |
+| `hlsSegmentCount: 7200` | 7200 | 7200 × 4s ≈ 8h de DVR. |
+| `hlsSegmentDuration: 4s` | 4s | Latência ~10–12s; alinhado ao GOP do ABR. |
 | `hlsSegmentDuration: 1s` | 1s | Segmentos de 1 segundo. Menor = menor latência, mais requisições HTTP. |
 | `hlsSegmentMaxSize: 50M` | 50M | Limite por segmento para evitar estouro de RAM em picos de bitrate. |
 | `hlsDirectory: /hls` | /hls | Salva segmentos em disco em vez de RAM. Necessário para 8h de buffer. |
@@ -593,7 +599,7 @@ if (body && typeof body.pipe === 'function') {
 
 ## 6. Nginx
 
-**Arquivo:** `server/player/nginx.conf`
+**Arquivo:** `server/nginx/nginx.conf` (e includes em `server/nginx/includes/`)
 
 ### 6.1 Proxy para Merge
 
@@ -649,86 +655,17 @@ location / {
 }
 ```
 
-**Por quê:** Para rotas como `/recordings` ou `/live`, o Nginx tenta arquivo/diretório e, se não existir, serve `index.html`. O JavaScript do player cuida do roteamento.
+**Por quê:** Para rotas estáticas, o Nginx serve ficheiros de `server/static/`. O frontend completo foi removido — integração via BFF Java ([`docs/Frontend-Externo.md`](docs/Frontend-Externo.md)).
 
 ---
 
-## 7. Player (frontend)
+## 7. Frontend estático
 
-**Arquivo:** `server/player/index.html`
+**Arquivo:** `server/static/index.html`
 
-### 7.1 Inicialização e cookie
+Landing mínima servida pelo Nginx. **Não há player integrado** — o browser consome live e gravações via frontend externo + API Java (BFF).
 
-```javascript
-fetch('/api/init', { credentials: 'include' }).catch(() => {});
-```
-
-**Por quê:** `credentials: 'include'` envia e recebe cookies. Necessário para que o cookie `vid_ctx` seja definido e enviado nas requisições de vídeo.
-
-### 7.2 Bloqueio do menu de contexto
-
-```javascript
-video.addEventListener('contextmenu', e => e.preventDefault());
-```
-
-**Por quê:** Reduz a chance de o usuário usar "Salvar vídeo como..." no player.
-
-### 7.3 URL do HLS
-
-```javascript
-function getHLSUrl(name) {
-  return baseUrl + '/hls/live/' + encodeURIComponent(name) + '/index.m3u8';
-}
-```
-
-**Por quê:** O MediaMTX expõe o HLS em `http://host:8888/live/NOME/index.m3u8`. O Nginx faz proxy de `/hls/` para `mediamtx:8888/`, então a URL no player é `http://host:8081/hls/live/NOME/index.m3u8`. `encodeURIComponent(name)` evita problemas com caracteres especiais no nome do stream.
-
-### 7.4 Barra de seek em live
-
-```javascript
-if (!isVodMode && (end - curr) < 10) {
-  seek.value = 100;
-} else {
-  seek.value = ((curr - start) / range) * 100;
-}
-```
-
-**Por quê:** Em live, o `seekable.end` avança a cada atualização da playlist HLS (ex.: a cada 5–8s). Se a barra fosse calculada normalmente, ela “voltaria” a cada atualização. Quando o usuário está a até 10s do live, fixamos a barra em 100% para evitar esse efeito.
-
-### 7.5 Configuração do HLS.js para live
-
-```javascript
-hls = new Hls({
-  liveSyncDurationCount: isVod ? 1 : 3,
-  liveMaxLatencyDurationCount: isVod ? 2 : Infinity,
-  liveDurationInfinity: !isVod,
-  maxBufferLength: isVod ? 30 : 60,
-  maxMaxBufferLength: isVod ? 60 : 300
-});
-```
-
-| Parâmetro | Live | VOD | Explicação |
-|----------|------|-----|------------|
-| `liveSyncDurationCount` | 3 | 1 | Em live, fica 3 segmentos atrás do live. Em VOD, 1. |
-| `liveMaxLatencyDurationCount` | Infinity | 2 | Em live, não força retorno ao live ao pausar/voltar. Em VOD, permite sync normal. |
-| `liveDurationInfinity` | true | false | Em live, duração infinita (barra de progresso contínua). |
-| `maxBufferLength` | 60 | 30 | Em live, buffer de 60s para permitir voltar no tempo. |
-| `maxMaxBufferLength` | 300 | 60 | Até 5 min de buffer em live para DVR. |
-
-**Por quê:** `liveMaxLatencyDurationCount: Infinity` evita que o HLS.js puxe o playhead de volta ao live quando o usuário pausa ou volta no tempo.
-
-### 7.6 Elemento de vídeo
-
-```html
-<video id="video" playsinline controls controlsList="nodownload noremoteplayback" disablePictureInPicture disableRemotePlayback></video>
-```
-
-| Atributo | Explicação |
-|----------|------------|
-| `playsinline` | Em mobile, reproduz inline em vez de tela cheia. |
-| `controlsList="nodownload noremoteplayback"` | Remove botão de download e opção de remote playback nos controles nativos. |
-| `disablePictureInPicture` | Desativa PiP. |
-| `disableRemotePlayback` | Desativa Chromecast e similares. |
+Para implementação de player, ver [`docs/GUIA_PLAYER_FRONT_DO_ZERO.md`](docs/GUIA_PLAYER_FRONT_DO_ZERO.md) e [`docs/Frontend-Externo.md`](docs/Frontend-Externo.md).
 
 ---
 

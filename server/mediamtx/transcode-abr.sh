@@ -28,13 +28,13 @@ exec ffmpeg -hide_banner -loglevel warning \
   -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 2800k -maxrate 2800k -bufsize 5600k \
   -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
-  -c:a aac -b:a 128k -ar 44100 \
+  -c:a aac -b:a 128k -ar 48000 \
   -max_muxing_queue_size 4096 \
   -f flv "rtmp://127.0.0.1:1935/${OUT720}" \
   -map "[vout2]" -map "0:a?" \
   -c:v libx264 -preset "$PRESET" -pix_fmt yuv420p $X264_LIVE_OPTS \
   -b:v 1200k -maxrate 1200k -bufsize 2400k \
   -force_key_frames "expr:gte(t,n_forced*${HLS_GOP_SEC})" \
-  -c:a aac -b:a 128k -ar 44100 \
+  -c:a aac -b:a 128k -ar 48000 \
   -max_muxing_queue_size 4096 \
   -f flv "rtmp://127.0.0.1:1935/${OUT480}"

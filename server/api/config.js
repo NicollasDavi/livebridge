@@ -63,7 +63,7 @@ export const LIVE_HLS_PROBE_VARIANT = String(process.env.LIVE_HLS_PROBE_VARIANT 
  */
 export const LIVE_READY_MIN_SEGMENTS = Math.max(
   0,
-  parseInt(process.env.LIVE_READY_MIN_SEGMENTS || '0', 10) || 0
+  parseInt(process.env.LIVE_READY_MIN_SEGMENTS || '2', 10) || 0
 );
 export const LIVE_HLS_PROBE_TIMEOUT_MS = Math.min(
   30000,
@@ -73,6 +73,26 @@ export const LIVE_HLS_PROBE_TIMEOUT_MS = Math.min(
 export const LIVE_HLS_READY_CACHE_MS = Math.max(
   0,
   parseInt(process.env.LIVE_HLS_READY_CACHE_MS || '1000', 10) || 1000
+);
+
+/**
+ * Tokens permitidos para publish RTMP (ingest OBS em live/<nome>).
+ * RTMP_PUBLISH_TOKENS=token1,token2 ou RTMP_PUBLISH_TOKEN=token único.
+ * OBS: Server rtmp://HOST:80/live — Stream key: NOME?token=SEU_TOKEN (ou pass= / autenticação OBS).
+ */
+export const RTMP_PUBLISH_TOKENS = (() => {
+  const combined = [process.env.RTMP_PUBLISH_TOKEN, process.env.RTMP_PUBLISH_TOKENS]
+    .filter(Boolean)
+    .join(',');
+  return combined
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+})();
+
+/** 0/false = dev local sem token (não usar em produção). Padrão: exigir token. */
+export const RTMP_PUBLISH_AUTH_REQUIRED = !['0', 'false', 'off', 'no'].includes(
+  String(process.env.RTMP_PUBLISH_AUTH_REQUIRED ?? '1').trim().toLowerCase()
 );
 
 export const VIDEO_ACCESS_SECRET = process.env.VIDEO_ACCESS_SECRET;

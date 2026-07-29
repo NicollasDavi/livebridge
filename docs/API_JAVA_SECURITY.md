@@ -16,6 +16,29 @@ VIDEO_ACCESS_SECRET=<segredo_compartilhado>
 
 Use um valor aleatório forte (ex.: `openssl rand -hex 32`).
 
+**Comportamento com `VIDEO_ACCESS_SECRET` definido:**
+
+- **Live:** JWT via `POST /api/lessons/check-live-access` (Java) → cookie `vid_live` ou token na query.
+- **Gravações/VOD:** JWT via `POST /api/lessons/check-video-access` (Java) → `token=` nas URLs HLS/MP4.
+- **Sem fallback:** cookie `vid_ctx` genérico **não** libera playback de gravações quando o segredo está ativo.
+
+---
+
+## Publish RTMP (OBS)
+
+Defina o mesmo token no LiveBridge e no OBS:
+
+```
+RTMP_PUBLISH_TOKEN=<segredo_forte>
+```
+
+| OBS | Valor |
+|-----|-------|
+| Servidor | `rtmp://HOST:80/live` |
+| Chave | `NOME_DA_LIVE?token=<RTMP_PUBLISH_TOKEN>` |
+
+Sem token válido, o MediaMTX nega o publish (hook `/api/internal/mediamtx-auth`).
+
 ---
 
 ## 1. `POST /api/lessons/check-video-access`

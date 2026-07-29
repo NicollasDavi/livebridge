@@ -64,7 +64,18 @@ export function createApp() {
 
 export function logStartupHints() {
   if (!cfg.VIDEO_ACCESS_SECRET) {
-    console.log('VIDEO_ACCESS_SECRET não configurado — vídeo e live exigem token JWT do Java');
+    console.log('VIDEO_ACCESS_SECRET não configurado — live/VOD usam cookie opaco (dev). Produção: definir segredo + JWT do Java.');
+  } else {
+    console.log('VIDEO_ACCESS_SECRET ativo — gravações/VOD exigem JWT (sem fallback por cookie).');
+  }
+  if (cfg.RTMP_PUBLISH_AUTH_REQUIRED) {
+    if (cfg.RTMP_PUBLISH_TOKENS.length) {
+      console.log(`RTMP publish protegido (${cfg.RTMP_PUBLISH_TOKENS.length} token(s) configurado(s)).`);
+    } else {
+      console.warn('RTMP_PUBLISH_AUTH_REQUIRED=1 mas RTMP_PUBLISH_TOKEN vazio — publish OBS será negado até configurar token.');
+    }
+  } else {
+    console.warn('RTMP_PUBLISH_AUTH_REQUIRED=0 — publish RTMP aberto (apenas dev local).');
   }
   if (!hasR2) console.log('R2 não configurado — aba Gravações desabilitada');
   if (!cfg.hasLessonsApi) console.log('API Lessons não configurada — metadata desabilitada');

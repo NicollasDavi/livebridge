@@ -13,14 +13,16 @@ export function requireR2(req, res, next) {
 
 export function requireVideoAuth(req, res, next) {
   const { path: p, session, token } = req.query;
-  const cookie = req.cookies?.[cfg.VIDEO_ACCESS_COOKIE];
 
   if (cfg.VIDEO_ACCESS_SECRET) {
     const payload = verifyVideoToken(token);
     if (payload && payload.path === p && payload.session === session) return next();
-    if (cookie && cookie.length >= 32) return next();
-    return res.status(403).json({ error: 'Token inválido ou expirado. Obtenha novo token na plataforma.' });
+    return res.status(403).json({
+      error: 'Token JWT inválido ou expirado. Obtenha novo token via POST /api/lessons/check-video-access no BFF Java.'
+    });
   }
+
+  const cookie = req.cookies?.[cfg.VIDEO_ACCESS_COOKIE];
   if (!cookie || cookie.length < 32) {
     return res.status(403).json({ error: 'Acesso negado. Acesse a plataforma primeiro.' });
   }

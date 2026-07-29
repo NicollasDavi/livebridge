@@ -42,6 +42,10 @@ jobs:
         working-directory: server/api
         run: npm ci
 
+      - name: Test API
+        working-directory: server/api
+        run: npm test
+
       - name: Install Merge dependencies
         working-directory: server/merge
         run: npm ci

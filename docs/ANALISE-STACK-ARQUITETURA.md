@@ -18,7 +18,7 @@ O **LiveBridge** (também referido como **PosiLive** na documentação de negóc
 
 Na arquitetura de produção da Posiplay, o **browser não fala diretamente com o LiveBridge**: o **frontend** consome a **API Java (Spring)**, que atua como **BFF** — valida sessão, emite JWT, faz proxy de HLS/VOD e encaminha chamadas ao LiveBridge na rede interna.
 
-**Exceção:** o professor publica RTMP **diretamente** no endpoint de ingestão do LiveBridge (`rtmp://HOST:80/live/NOME`).
+**Exceção:** o professor publica RTMP **diretamente** no endpoint de ingestão do LiveBridge (`rtmp://HOST:80/live`) com **token de publish** (`RTMP_PUBLISH_TOKEN` no `.env` + chave OBS `NOME?token=...`).
 
 ---
 
@@ -36,7 +36,7 @@ Na arquitetura de produção da Posiplay, o **browser não fala diretamente com 
 | Pós-processamento | Node.js + FFmpeg | Node 22 Bookworm + ffmpeg | Concatenação, encode H.264/H.265, upload multipart R2 |
 | Armazenamento objeto | Cloudflare R2 | API S3-compatível | MP4 finais (`recordings/videos/...`) |
 | Metadados acadêmicos | API Java (externa) | Spring Boot | Títulos, professor, matéria, cursos, flag `ativo` |
-| CI/CD | GitHub Actions | `appleboy/ssh-action` | Deploy SSH em push para `main` |
+| CI/CD | GitHub Actions | publish imagens `api`/`merge` no **GHCR**; deploy manual na VM |
 | Observabilidade (opcional) | Prometheus, Grafana, Loki, Alertmanager, exporters | ver `docker-compose.observability.yml` | Métricas, logs, alertas, dashboards |
 
 ### 2.2 Dependências Node.js (API)
@@ -136,7 +136,7 @@ flowchart TB
 | Ingest RTMP | Path `live/<nome>` (regex `~^live/[^/]+$`) |
 | ABR live | `runOnReady: transcode-abr.sh` gera `live/<nome>_1080`, `_720`, `_480` |
 | Gravação | Segmentos `.ts` de 60s em `/recordings/live/<nome>/<timestamp>/` |
-| HLS DVR | ~8h de buffer (2880 segmentos × 10s), disco em volume `mediamtx-hls` |
+| HLS DVR | ~8h de buffer (7200 segmentos × 4s), disco em volume `mediamtx-hls` |
 | Auth publish | HTTP hook `POST /api/internal/mediamtx-auth` — só rede Docker publica |
 | Leitura HLS | Sem auth no MTX; proteção na borda (nginx + JWT) |
 
@@ -380,7 +380,7 @@ Rede Docker ──► MediaMTX publish auth (IP interno)
 
 ### 10.2 Latência HLS
 
-- Segmentos de **10s** (menos requisições, maior latência que 1–2s)
+- Segmentos de **4s** (latência ~10–12s; nginx faz cache de `.ts`)
 - DVR de **8h** exige disco (volume `mediamtx-hls`), não RAM
 
 ### 10.3 Escalabilidade

@@ -14,7 +14,19 @@ Servidor de streaming ao vivo com HLS.
 
 **⚙️ [API Settings (front)](docs/API_SETTINGS_FRONT.md)** — `GET/PUT /api/settings`: merge, encode, gravação; contrato para o frontend.
 
-**🚀 [CI/CD](docs/CI_CD.md)** — GitHub Actions → Artifact Registry/GCS; VM faz pull (sem SSH).
+**🚀 [CI/CD](docs/CI_CD.md)** — GitHub Actions → GHCR; VM faz pull manual (sem SSH).
+
+## Segurança (produção)
+
+Configure no `.env` da VM:
+
+| Variável | Uso |
+|----------|-----|
+| `VIDEO_ACCESS_SECRET` | Segredo compartilhado com a API Java — JWT obrigatório para live e gravações |
+| `RTMP_PUBLISH_TOKEN` | Token para publish RTMP (OBS). Sem isso, o ingest é **negado** |
+| `RTMP_PUBLISH_AUTH_REQUIRED=0` | Só dev local — desliga exigência de token no RTMP |
+
+Com `VIDEO_ACCESS_SECRET` definido, gravações/VOD **não** aceitam cookie genérico — o browser precisa do JWT emitido pelo BFF Java.
 
 ## Início rápido
 
@@ -28,7 +40,11 @@ docker compose up -d
 ### Publicar (OBS)
 
 - **Servidor:** `rtmp://SEU_IP:80/live` (no host a porta **80** é RTMP; dentro do contentor o MediaMTX continua na **1935**)
-- **Chave:** qualquer nome (ex: `teste`)
+- **Chave de transmissão:** `NOME_DA_LIVE?token=SEU_RTMP_PUBLISH_TOKEN`  
+  (alternativa MediaMTX/OBS: `NOME_DA_LIVE?user=x&pass=SEU_RTMP_PUBLISH_TOKEN`)
+- Defina `RTMP_PUBLISH_TOKEN` no `.env` antes de transmitir. Publish sem token válido é **negado**.
+
+**Dev local (sem token):** `RTMP_PUBLISH_AUTH_REQUIRED=0` no `.env` — não usar em produção.
 
 ### Assistir
 
